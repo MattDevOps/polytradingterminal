@@ -70,9 +70,13 @@ class Engine:
     async def _run_cycle(self) -> None:
         # 1. Fetch top markets by 24h volume
         markets = await self.api.get_markets(limit=TOP_N, active=True)
+        now = datetime.now(timezone.utc)
         markets = [
             m for m in markets
-            if m.outcome_prices and m.clob_token_ids and not m.closed
+            if m.outcome_prices
+            and m.clob_token_ids
+            and not m.closed
+            and not _is_ended(m.end_date, now)
         ]
 
         if not markets:
@@ -339,6 +343,12 @@ def _find_name(markets: list[Market], mid: str) -> str:
         if m.id == mid:
             return m.question
     return mid[:12]
+
+
+def _is_ended(raw_end: str | None, now: datetime) -> bool:
+    """Return True if the market's end_date is in the past."""
+    end = _parse_end_date(raw_end)
+    return end is not None and end <= now
 
 
 def _parse_end_date(raw: str | None) -> datetime | None:
