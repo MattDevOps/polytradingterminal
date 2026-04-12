@@ -26,8 +26,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-REFRESH_SECONDS = 45
-REFRESH_FAST = 15  # used when markets are closing soon
+REFRESH_SECONDS = 15
+REFRESH_FAST = 5  # used when markets are closing soon
 
 # ── Theme colours ────────────────────────────────────────────────────────
 

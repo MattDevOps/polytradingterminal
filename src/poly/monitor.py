@@ -18,8 +18,8 @@ log = logging.getLogger(__name__)
 ALERT_SIGNALS = {Signal.ENTER, Signal.STRONG_ENTER}
 
 # Refresh intervals (seconds) – mirrors the GUI
-REFRESH_NORMAL = 45
-REFRESH_FAST = 15
+REFRESH_NORMAL = 15
+REFRESH_FAST = 5
 
 
 async def _loop() -> None:

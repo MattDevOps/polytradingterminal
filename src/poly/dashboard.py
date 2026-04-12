@@ -15,8 +15,8 @@ from .engine import Engine, EngineState
 from .models import MarketScore, Signal
 from .portfolio import Position
 
-REFRESH_SECONDS = 45
-REFRESH_FAST = 15  # used when markets are closing soon
+REFRESH_SECONDS = 15
+REFRESH_FAST = 5  # used when markets are closing soon
 
 # ── Styling helpers ───────────────────────────────────────────────────────
 

@@ -283,7 +283,7 @@ class Engine:
     async def _fetch_enrichment(
         self, markets: list[Market],
     ) -> tuple[dict[str, list[float]], dict[str, list[dict]]]:
-        """Fetch price histories and recent trades for each market."""
+        """Fetch price histories, live CLOB midpoints, and recent trades."""
 
         price_series: dict[str, list[float]] = {}
         trades_by_market: dict[str, list[dict]] = {}
@@ -308,11 +308,26 @@ class Engine:
             except Exception as exc:
                 log.debug("Trades failed for %s: %s", m.id, exc)
 
+        async def fetch_live_price(m: Market) -> None:
+            """Fetch real-time midpoint from CLOB and overwrite stale Gamma price."""
+            if not m.clob_token_ids:
+                return
+            try:
+                mid = await self.api.get_midpoint(m.clob_token_ids[0])
+                if mid and mid > 0:
+                    m.outcome_prices[0] = mid
+                    # For binary markets, complement the second outcome
+                    if len(m.outcome_prices) >= 2:
+                        m.outcome_prices[1] = round(1.0 - mid, 4)
+            except Exception as exc:
+                log.debug("CLOB midpoint failed for %s: %s", m.id, exc)
+
         # Fire all requests concurrently
         tasks = []
         for m in markets:
             tasks.append(fetch_prices(m))
             tasks.append(fetch_trades(m))
+            tasks.append(fetch_live_price(m))
 
         await asyncio.gather(*tasks, return_exceptions=True)
 

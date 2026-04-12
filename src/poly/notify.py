@@ -5,8 +5,12 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+# Path to the GUI launcher script (project root)
+_GUI_LAUNCHER = Path(__file__).resolve().parents[2] / "poly_gui.pyw"
 
 
 def _patch_winotify() -> None:
@@ -57,11 +61,13 @@ def send_toast(title: str, body: str, url: str | None = None) -> None:
         from winotify import Notification
 
         _patch_winotify()
+        gui_path = str(_GUI_LAUNCHER) if _GUI_LAUNCHER.exists() else ""
         toast = Notification(
             app_id="Poly Trading Terminal",
             title=title,
             msg=body,
             duration="long",
+            launch=gui_path,
         )
         if url:
             toast.add_actions(label="View on Polymarket", launch=url)
