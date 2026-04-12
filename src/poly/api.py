@@ -140,6 +140,44 @@ class PolymarketAPI:
                 log.debug("Skipping malformed market: %s", exc)
         return out
 
+    async def get_market(self, market_id: str) -> Market | None:
+        """Fetch a single market by ID (works for closed/resolved markets too)."""
+        try:
+            m = await self._get(f"{GAMMA}/markets/{market_id}")
+        except Exception:
+            return None
+        if not m or not isinstance(m, dict):
+            return None
+        try:
+            outcomes = _parse_json_field(m.get("outcomes"))
+            prices = _parse_json_field(m.get("outcomePrices"))
+            clob_ids = _parse_json_field(m.get("clobTokenIds"))
+            return Market(
+                id=str(m["id"]),
+                question=m.get("question", ""),
+                slug=m.get("slug", ""),
+                outcomes=outcomes,
+                outcome_prices=[_float(p) for p in prices],
+                clob_token_ids=[str(c) for c in clob_ids],
+                condition_id=m.get("conditionId", ""),
+                volume=_float(m.get("volume")),
+                liquidity=_float(m.get("liquidity")),
+                volume_24h=_float(m.get("volume24hr")),
+                active=bool(m.get("active")),
+                closed=bool(m.get("closed")),
+                end_date=m.get("endDate"),
+                event_id=_extract_event_id(m),
+                event_slug=_extract_event_slug(m),
+                neg_risk_id=m.get("negRiskMarketID") or None,
+                group_title=m.get("groupItemTitle") or None,
+                spread=_float(m.get("spread")),
+                best_bid=_float(m.get("bestBid")),
+                best_ask=_float(m.get("bestAsk")),
+            )
+        except (KeyError, TypeError) as exc:
+            log.debug("Failed to parse market %s: %s", market_id, exc)
+            return None
+
     async def get_events(
         self, limit: int = 50, active: bool = True, closed: bool = False,
     ) -> list[dict]:

@@ -26,6 +26,7 @@ class Position:
     entry_price: float      # price paid per share (0.0 – 1.0)
     shares: float = 1.0     # number of shares
     entry_time: float = 0.0 # unix timestamp
+    status: str = "open"    # "open", "won", "lost"
 
     # ── live fields (not persisted, filled at runtime) ──
     current_price: float = 0.0
@@ -36,8 +37,24 @@ class Position:
         if self.entry_time == 0.0:
             self.entry_time = time.time()
 
+    @property
+    def resolved(self) -> bool:
+        return self.status in ("won", "lost")
+
+    def resolve(self, won: bool) -> None:
+        """Mark this position as won or lost after market closure."""
+        self.status = "won" if won else "lost"
+        self.current_price = 1.0 if won else 0.0
+        if self.entry_price > 0:
+            self.pnl_pct = (self.current_price - self.entry_price) / self.entry_price
+        else:
+            self.pnl_pct = 0.0
+        self.pnl_abs = (self.current_price - self.entry_price) * self.shares
+
     def update_pnl(self, current_price: float) -> None:
         """Recompute P&L given the current market price for this side."""
+        if self.resolved:
+            return  # don't overwrite resolved outcome
         self.current_price = current_price
         if self.entry_price > 0:
             self.pnl_pct = (current_price - self.entry_price) / self.entry_price
@@ -71,6 +88,7 @@ class Portfolio:
                     entry_price=d["entry_price"],
                     shares=d.get("shares", 1.0),
                     entry_time=d.get("entry_time", 0.0),
+                    status=d.get("status", "open"),
                 )
                 for d in data
             ]
@@ -88,6 +106,7 @@ class Portfolio:
                 "entry_price": p.entry_price,
                 "shares": p.shares,
                 "entry_time": p.entry_time,
+                "status": p.status,
             }
             for p in self.positions
         ]

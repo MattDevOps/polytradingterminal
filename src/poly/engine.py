@@ -129,16 +129,23 @@ class Engine:
         if self.portfolio.positions:
             prices_map: dict[str, list[float]] = {}
             outcomes_map: dict[str, list[str]] = {}
+            active_ids = set()
             for m in markets:
                 prices_map[m.id] = m.outcome_prices
                 outcomes_map[m.id] = m.outcomes
+                active_ids.add(m.id)
             pnl_alerts = self.portfolio.update_prices(prices_map, outcomes_map)
             self.state.alerts.extend(pnl_alerts)
+
+            # Check held positions that aren't in the active market list
+            # — they may have closed/resolved
+            resolution_alerts = await self._check_resolutions(active_ids)
+            self.state.alerts.extend(resolution_alerts)
 
             # Also alert if a held position's signal degrades to EXIT
             for ms in scored:
                 pos = self.portfolio.get(ms.market.id)
-                if pos and ms.signal == Signal.EXIT:
+                if pos and not pos.resolved and ms.signal == Signal.EXIT:
                     msg = (
                         f"! SELL {pos.side}: {pos.question[:40]} "
                         f"— signal EXIT + P&L {pos.pnl_pct:+.0%}"
@@ -156,6 +163,76 @@ class Engine:
             for alert in pnl_alerts:
                 if alert.startswith("$ PROFIT"):
                     send_toast("Profit Target Hit", alert)
+
+    # ------------------------------------------------------------------
+    # Resolution detection
+    # ------------------------------------------------------------------
+
+    async def _check_resolutions(self, active_ids: set[str]) -> list[str]:
+        """Check held positions not in the active scan for market closure."""
+        alerts: list[str] = []
+        unresolved = [
+            p for p in self.portfolio.positions
+            if not p.resolved and p.market_id not in active_ids
+        ]
+        if not unresolved:
+            return alerts
+
+        # Fetch market data for each missing position
+        fetch_tasks = [self.api.get_market(p.market_id) for p in unresolved]
+        results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+        changed = False
+        for pos, result in zip(unresolved, results):
+            if isinstance(result, Exception) or result is None:
+                continue
+            market = result
+            if not market.closed:
+                # Still open, just not in the top-N — update price
+                price = self.portfolio._resolve_price(
+                    pos.side, market.outcome_prices, market.outcomes,
+                )
+                if price is not None:
+                    pos.update_pnl(price)
+                continue
+
+            # Market is closed — determine if user's side won
+            # A resolved market has winning outcome at ~1.0 and losers at ~0.0
+            price = self.portfolio._resolve_price(
+                pos.side, market.outcome_prices, market.outcomes,
+            )
+            if price is None:
+                continue
+
+            won = price > 0.5
+            pos.resolve(won)
+            changed = True
+
+            if won:
+                pnl_style = "+"
+                label = "WIN"
+                send_toast(
+                    "Position Won!",
+                    f"{pos.question[:50]}\n{pos.side} | P&L {pos.pnl_pct:+.0%}",
+                )
+            else:
+                pnl_style = ""
+                label = "LOSS"
+                send_toast(
+                    "Position Lost",
+                    f"{pos.question[:50]}\n{pos.side} | P&L {pos.pnl_pct:+.0%}",
+                )
+
+            alerts.append(
+                f"{'✓' if won else '✗'} {label}: {pos.question[:40]} "
+                f"({pos.side} @ {pos.entry_price:.2f} → {pos.current_price:.2f}, "
+                f"P&L {pos.pnl_pct:+.0%})"
+            )
+
+        if changed:
+            self.portfolio.save()
+
+        return alerts
 
     # ------------------------------------------------------------------
     # Data enrichment

@@ -67,7 +67,14 @@ class DetailPanel(Static):
         # Position P&L (if held)
         if position is not None:
             pnl_color = "bold green" if position.pnl_pct >= 0 else "bold red"
-            t.append("  ── YOUR POSITION ──\n", style="bold cyan")
+            if position.resolved:
+                status_label = "WIN" if position.status == "won" else "LOSS"
+                status_style = "bold white on dark_green" if position.status == "won" else "bold white on red"
+                t.append(f"  ── YOUR POSITION ── ", style="bold cyan")
+                t.append(f" {status_label} ", style=status_style)
+                t.append("\n")
+            else:
+                t.append("  ── YOUR POSITION ──\n", style="bold cyan")
             t.append(f"  Side   {position.side}\n", style="bold")
             t.append(f"  Entry  {position.entry_price:.2f}", style="bold")
             t.append(f"  →  Now  {position.current_price:.2f}\n", style="bold")
@@ -278,6 +285,25 @@ class PolyTerminal(App):
         table.clear()
         portfolio = self.engine.portfolio
 
+        # Show resolved positions (not in active scan) at the top
+        scored_ids = {ms.market.id for ms in self._scored}
+        for pos in portfolio.positions:
+            if pos.market_id in scored_ids or not pos.resolved:
+                continue
+            q = "* " + pos.question
+            if len(q) > 36:
+                q = q[:34] + ".."
+            result_label = "WIN" if pos.status == "won" else "LOSS"
+            result_style = "bold white on dark_green" if pos.status == "won" else "bold white on red"
+            q_style = "bold green on #1a2f1a" if pos.status == "won" else "bold red on #2f1a1a"
+            table.add_row(
+                Text("---", style="dim"),
+                Text(q, style=q_style),
+                Text(f" {pos.side} ", style="dim"),
+                Text(f" {result_label} {pos.pnl_pct:+.0%} ", style=result_style),
+                Text(" RESOLVED ", style=result_style),
+            )
+
         for ms in self._scored:
             q = ms.market.question
             held = portfolio.has(ms.market.id)
@@ -296,8 +322,13 @@ class PolyTerminal(App):
             # Show P&L instead of raw price if position is held
             if held:
                 pos = portfolio.get(ms.market.id)
-                pnl_style = "bold green" if pos and pos.pnl_pct >= 0 else "bold red"
-                price_text = Text(f"{price:.2f} {pos.pnl_pct:+.0%}" if pos else f"{price:.2f}", style=pnl_style)
+                if pos and pos.resolved:
+                    label = "WIN" if pos.status == "won" else "LOSS"
+                    style = "bold white on dark_green" if pos.status == "won" else "bold white on red"
+                    price_text = Text(f" {label} {pos.pnl_pct:+.0%} ", style=style)
+                else:
+                    pnl_style = "bold green" if pos and pos.pnl_pct >= 0 else "bold red"
+                    price_text = Text(f"{price:.2f} {pos.pnl_pct:+.0%}" if pos else f"{price:.2f}", style=pnl_style)
             else:
                 price_text = Text(f"{price:.2f}", style="bold")
 
