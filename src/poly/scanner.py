@@ -38,9 +38,9 @@ async def _scan() -> None:
         lines: list[str] = []
         for ms in hits:
             q = ms.market.question
-            if len(q) > 60:
-                q = q[:58] + "..."
-            lines.append(f"[{ms.signal.value}] {q}  (score {ms.composite:.2f})")
+            if len(q) > 50:
+                q = q[:48] + "..."
+            lines.append(f"[{ms.signal.value}] BUY {ms.pick} — {q}  (score {ms.composite:.2f})")
 
         title = f"Poly Scanner: {len(hits)} signal{'s' if len(hits) != 1 else ''} found"
         body = "\n".join(lines[:5])  # cap at 5 to fit in toast

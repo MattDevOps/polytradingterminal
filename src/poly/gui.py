@@ -220,12 +220,13 @@ class PolyGUI:
                        bg=ACCENT, fg="#ffffff", font=("Consolas", 10, "bold"))
         hdr.pack(fill="x")
 
-        cols = ("composite", "market", "price", "div", "disp", "vel", "pair", "signal")
+        cols = ("composite", "market", "pick", "price", "div", "disp", "vel", "pair", "signal")
         self._tree = ttk.Treeview(parent, columns=cols, show="headings",
                                    style="Scanner.Treeview", selectmode="browse")
 
         self._tree.heading("composite", text="SCORE")
         self._tree.heading("market",    text="MARKET")
+        self._tree.heading("pick",      text="PICK")
         self._tree.heading("price",     text="PRICE")
         self._tree.heading("div",       text="DIV")
         self._tree.heading("disp",      text="DISP")
@@ -234,7 +235,8 @@ class PolyGUI:
         self._tree.heading("signal",    text="SIGNAL")
 
         self._tree.column("composite", width=65,  anchor="center", stretch=False)
-        self._tree.column("market",    width=280, anchor="w")
+        self._tree.column("market",    width=240, anchor="w")
+        self._tree.column("pick",      width=75,  anchor="center", stretch=False)
         self._tree.column("price",     width=60,  anchor="center", stretch=False)
         self._tree.column("div",       width=50,  anchor="center", stretch=False)
         self._tree.column("disp",      width=50,  anchor="center", stretch=False)
@@ -289,6 +291,12 @@ class PolyGUI:
                                     foreground=ACCENT)
         self._detail.tag_configure("composite_val", font=("Consolas", 14, "bold"),
                                     foreground=FG)
+        self._detail.tag_configure("pick_yes", font=("Consolas", 16, "bold"),
+                                    foreground="#000000", background=GREEN)
+        self._detail.tag_configure("pick_no", font=("Consolas", 16, "bold"),
+                                    foreground="#000000", background=RED)
+        self._detail.tag_configure("pick_label", font=("Consolas", 11, "bold"),
+                                    foreground=ACCENT)
         self._detail.tag_configure("link", foreground=ACCENT, underline=True,
                                     font=("Consolas", 10))
 
@@ -341,14 +349,16 @@ class PolyGUI:
         self._tree.delete(*self._tree.get_children())
         for ms in self._scored:
             q = ms.market.question
-            if len(q) > 50:
-                q = q[:48] + ".."
+            if len(q) > 45:
+                q = q[:43] + ".."
             price = ms.market.outcome_prices[0] if ms.market.outcome_prices else 0.0
             tag = ms.signal.name.lower()
+            pick_str = f">> {ms.pick} <<"
 
             self._tree.insert("", "end", values=(
                 f"{ms.composite:.3f}",
                 q,
+                pick_str,
                 f"{price:.2f}",
                 f"{ms.divergence.value:.2f}",
                 f"{ms.disposition.value:.2f}",
@@ -431,6 +441,13 @@ class PolyGUI:
 
         # Title
         d.insert("end", m.question + "\n\n", "title")
+
+        # Pick recommendation — the most important info
+        pick_tag = "pick_yes" if ms.pick == "YES" else "pick_no"
+        d.insert("end", "  PICK  ", "pick_label")
+        d.insert("end", f"  BUY {ms.pick}  ", pick_tag)
+        conf_pct = ms.pick_confidence * 100
+        d.insert("end", f"  ({conf_pct:.0f}% confidence)\n\n", "dim")
 
         # Price / volume / liquidity
         price = m.outcome_prices[0] if m.outcome_prices else 0.0

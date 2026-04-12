@@ -89,11 +89,16 @@ def _score_multi_outcome(group: list[Market], out: dict[str, FactorScore]) -> No
         # Normalize: 5c divergence is significant, 10c+ is extreme
         normalized = min(1.0, divergence / 0.08)
 
+        # Bias: fair > price → YES underpriced (+), fair < price → YES overpriced (-)
+        raw_bias = fair - price
+        bias = max(-1.0, min(1.0, raw_bias / 0.08))
+
         group_name = m.group_title or m.question[:20]
         out[m.id] = FactorScore(
             name="divergence",
             value=round(normalized, 3),
             raw=round(divergence, 4),
+            bias=round(bias, 3),
             details=(
                 f"[{group_name}] fair {fair:.2f} vs mkt {price:.2f} "
                 f"(Δ{divergence:.3f}, vig {overround:+.3f}, {len(prices)} outcomes)"
@@ -128,6 +133,7 @@ def _score_binary(
         details_parts.append(f"spread {spread:.3f}")
 
     # 2. Price momentum divergence: is the last price far from recent mean?
+    bias = 0.0
     prices = price_series.get(m.id, [])
     if len(prices) >= 20:
         recent = prices[-20:]
@@ -136,6 +142,10 @@ def _score_binary(
         momentum_div = abs(last_price - mean_price)
         components.append(min(1.0, momentum_div / 0.08))
         details_parts.append(f"mom Δ{momentum_div:.3f}")
+        # Mean reversion: if price dropped below mean → YES underpriced (+)
+        #                  if price rose above mean → YES overpriced (-)
+        raw_bias = mean_price - last_price
+        bias = max(-1.0, min(1.0, raw_bias / 0.08))
 
     if not components:
         out[m.id] = FactorScore("divergence", 0.0, details="insufficient data")
@@ -147,5 +157,6 @@ def _score_binary(
         name="divergence",
         value=round(value, 3),
         raw=round(components[0] if components else 0, 4),
+        bias=round(bias, 3),
         details=", ".join(details_parts),
     )

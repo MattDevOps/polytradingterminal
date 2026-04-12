@@ -109,10 +109,14 @@ def _score_market(
 
     blended = dc_score * 0.65 + flow * 0.35
 
+    # Bias: flow > 0.5 → smart money buying YES (+), flow < 0.5 → buying NO (-)
+    bias = max(-1.0, min(1.0, (flow - 0.5) * 2))
+
     return FactorScore(
         name="disposition",
         value=round(min(1.0, blended), 3),
         raw=round(weighted_dc, 2),
+        bias=round(bias, 3),
         details=f"DC {weighted_dc:.1f}, flow {flow:.0%} buy, {len(wallet_dcs)} wallets",
     )
 

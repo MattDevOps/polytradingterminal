@@ -50,6 +50,13 @@ class DetailPanel(Static):
         t = Text()
         t.append(m.question + "\n\n", style="bold")
 
+        # Pick recommendation
+        pick_style = "bold white on dark_green" if ms.pick == "YES" else "bold white on red"
+        t.append("  PICK  ", style="bold")
+        t.append(f"  BUY {ms.pick}  ", style=pick_style)
+        conf_pct = ms.pick_confidence * 100
+        t.append(f"  ({conf_pct:.0f}% confidence)\n\n", style="dim")
+
         price = m.outcome_prices[0] if m.outcome_prices else 0
         t.append(f"  Price  {price:.2f}", style="bold")
         t.append(f"    Vol24h ${m.volume_24h:,.0f}", style="dim")
@@ -151,7 +158,7 @@ class PolyTerminal(App):
 
     async def on_mount(self) -> None:
         table = self.query_one("#scanner", DataTable)
-        table.add_columns("SC", "MARKET", "PRICE", "SIGNAL")
+        table.add_columns("SC", "MARKET", "PICK", "PRICE", "SIGNAL")
         await self._do_refresh()
         self.set_interval(REFRESH_SECONDS, self._do_refresh)
 
@@ -191,10 +198,13 @@ class PolyTerminal(App):
                 q = q[:34] + ".."
 
             price = ms.market.outcome_prices[0] if ms.market.outcome_prices else 0.0
+            pick_style = "bold white on dark_green" if ms.pick == "YES" else "bold white on red"
+            pick_text = Text(f" {ms.pick} ", style=pick_style)
 
             table.add_row(
                 _bar(ms.composite, 3),
                 q,
+                pick_text,
                 Text(f"{price:.2f}", style="bold"),
                 _sig_text(ms.signal),
             )

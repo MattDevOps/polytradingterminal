@@ -42,6 +42,7 @@ class FactorScore:
     value: float          # 0.0 – 1.0  (higher = stronger signal)
     raw: float = 0.0      # un-normalized metric for display
     details: str = ""
+    bias: float = 0.0     # -1.0 (strong NO) … +1.0 (strong YES)
 
     @property
     def bar(self) -> str:
@@ -62,6 +63,24 @@ class MarketScore:
     @property
     def factors(self) -> list[FactorScore]:
         return [self.divergence, self.disposition, self.velocity, self.pairs]
+
+    @property
+    def pick(self) -> str:
+        """Return 'YES' or 'NO' — the recommended side to bet."""
+        # Weighted blend: divergence (mispricing direction) + disposition (smart-money flow)
+        div_bias = self.divergence.bias
+        disp_bias = self.disposition.bias
+        # Both carry directional info; average them
+        combined = div_bias * 0.5 + disp_bias * 0.5
+        return "YES" if combined >= 0 else "NO"
+
+    @property
+    def pick_confidence(self) -> float:
+        """0.0 – 1.0 confidence in the pick direction."""
+        div_bias = self.divergence.bias
+        disp_bias = self.disposition.bias
+        combined = div_bias * 0.5 + disp_bias * 0.5
+        return min(1.0, abs(combined))
 
     def score(self) -> None:
         """Compute composite score and signal from four factors.

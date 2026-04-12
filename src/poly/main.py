@@ -84,16 +84,16 @@ async def _headless(top_n: int) -> None:
             print(f"Error: {state.error}")
 
         # Header
-        print(f"{'SCORE':>6}  {'SIGNAL':<14} {'PRICE':>6}  {'DIV':>5} {'DISP':>5} {'VEL':>5} {'PAIR':>5}  MARKET")
-        print("─" * 100)
+        print(f"{'SCORE':>6}  {'SIGNAL':<14} {'PICK':>4} {'PRICE':>6}  {'DIV':>5} {'DISP':>5} {'VEL':>5} {'PAIR':>5}  MARKET")
+        print("─" * 105)
 
         for ms in state.markets[:top_n]:
             q = ms.market.question
-            if len(q) > 48:
-                q = q[:46] + "…"
+            if len(q) > 45:
+                q = q[:43] + "…"
             price = ms.market.outcome_prices[0] if ms.market.outcome_prices else 0.0
             print(
-                f"{ms.composite:6.3f}  {ms.signal.value:<14} {price:6.2f}"
+                f"{ms.composite:6.3f}  {ms.signal.value:<14} {ms.pick:>3} {price:6.2f}"
                 f"  {ms.divergence.value:5.2f} {ms.disposition.value:5.2f}"
                 f"  {ms.velocity.value:5.2f} {ms.pairs.value:5.2f}  {q}"
             )
