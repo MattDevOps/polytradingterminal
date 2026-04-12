@@ -82,16 +82,26 @@ def _score_multi_outcome(group: list[Market], out: dict[str, FactorScore]) -> No
     total = sum(p for _, p in prices)
     overround = total - 1.0
 
-    for m, price in prices:
+    # Compute raw biases first, then centre within the group.
+    # Without centring, overround pushes *every* outcome's bias negative,
+    # so the model says NO on everything — useless for multi-outcome events.
+    raw_biases: list[float] = []
+    for _, price in prices:
+        fair = price / total if total > 0 else price
+        raw_biases.append(fair - price)
+    mean_bias = sum(raw_biases) / len(raw_biases)
+
+    for (m, price), raw_bias in zip(prices, raw_biases):
         fair = price / total if total > 0 else price
         divergence = abs(price - fair)
 
         # Normalize: 5c divergence is significant, 10c+ is extreme
         normalized = min(1.0, divergence / 0.08)
 
-        # Bias: fair > price → YES underpriced (+), fair < price → YES overpriced (-)
-        raw_bias = fair - price
-        bias = max(-1.0, min(1.0, raw_bias / 0.08))
+        # Centre the bias so the relatively underpriced outcome gets YES (+)
+        # and the overpriced outcome gets NO (-), independent of the vig.
+        centred_bias = raw_bias - mean_bias
+        bias = max(-1.0, min(1.0, centred_bias / 0.08))
 
         group_name = m.group_title or m.question[:20]
         out[m.id] = FactorScore(
