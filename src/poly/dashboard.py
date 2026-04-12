@@ -12,6 +12,7 @@ from textual.widgets import DataTable, Footer, Header, RichLog, Static
 
 from .engine import Engine, EngineState
 from .models import MarketScore, Signal
+from .portfolio import Position
 
 REFRESH_SECONDS = 45
 
@@ -41,7 +42,7 @@ def _bar(val: float, width: int = 4) -> Text:
 
 class DetailPanel(Static):
 
-    def set_market(self, ms: MarketScore | None) -> None:
+    def set_market(self, ms: MarketScore | None, position: Position | None = None) -> None:
         if ms is None:
             self.update(Text("  Select a market", style="dim italic"))
             return
@@ -61,6 +62,19 @@ class DetailPanel(Static):
         t.append(f"  Price  {price:.2f}", style="bold")
         t.append(f"    Vol24h ${m.volume_24h:,.0f}", style="dim")
         t.append(f"    Liq ${m.liquidity:,.0f}\n\n", style="dim")
+
+        # Position P&L (if held)
+        if position is not None:
+            pnl_color = "bold green" if position.pnl_pct >= 0 else "bold red"
+            t.append("  ── YOUR POSITION ──\n", style="bold cyan")
+            t.append(f"  Side   {position.side}\n", style="bold")
+            t.append(f"  Entry  {position.entry_price:.2f}", style="bold")
+            t.append(f"  →  Now  {position.current_price:.2f}\n", style="bold")
+            t.append(f"  P&L    ", style="bold")
+            t.append(f"{position.pnl_pct:+.1%}", style=pnl_color)
+            if position.shares != 1.0:
+                t.append(f"  (${position.pnl_abs:+.2f} on {position.shares:.0f} shares)", style=pnl_color)
+            t.append("\n\n")
 
         for f in ms.factors:
             name = f.name.upper()
@@ -135,6 +149,8 @@ class PolyTerminal(App):
         Binding("q", "quit", "Quit"),
         Binding("r", "force_refresh", "Refresh"),
         Binding("o", "open_market", "Open in Browser"),
+        Binding("b", "add_position", "Buy/Track"),
+        Binding("s", "remove_position", "Sell/Untrack"),
     ]
 
     def __init__(self) -> None:
@@ -191,9 +207,13 @@ class PolyTerminal(App):
     def _rebuild_table(self) -> None:
         table = self.query_one("#scanner", DataTable)
         table.clear()
+        portfolio = self.engine.portfolio
 
         for ms in self._scored:
             q = ms.market.question
+            held = portfolio.has(ms.market.id)
+            if held:
+                q = "* " + q
             if len(q) > 36:
                 q = q[:34] + ".."
 
@@ -204,11 +224,19 @@ class PolyTerminal(App):
                 label = label[:12] + ".."
             pick_text = Text(f" {label} ", style=pick_style)
 
+            # Show P&L instead of raw price if position is held
+            if held:
+                pos = portfolio.get(ms.market.id)
+                pnl_style = "bold green" if pos and pos.pnl_pct >= 0 else "bold red"
+                price_text = Text(f"{price:.2f} {pos.pnl_pct:+.0%}" if pos else f"{price:.2f}", style=pnl_style)
+            else:
+                price_text = Text(f"{price:.2f}", style="bold")
+
             table.add_row(
                 _bar(ms.composite, 3),
                 q,
                 pick_text,
-                Text(f"{price:.2f}", style="bold"),
+                price_text,
                 _sig_text(ms.signal),
             )
 
@@ -220,7 +248,9 @@ class PolyTerminal(App):
         table = self.query_one("#scanner", DataTable)
         idx = table.cursor_row
         if idx is not None and 0 <= idx < len(self._scored):
-            detail.set_market(self._scored[idx])
+            ms = self._scored[idx]
+            pos = self.engine.portfolio.get(ms.market.id)
+            detail.set_market(ms, position=pos)
         else:
             detail.set_market(None)
 
@@ -233,6 +263,64 @@ class PolyTerminal(App):
             slug = ms.market.event_slug or ms.market.slug
             if slug:
                 webbrowser.open(f"https://polymarket.com/event/{slug}")
+
+    def action_add_position(self) -> None:
+        """Track the selected market as a bought position at current price."""
+        table = self.query_one("#scanner", DataTable)
+        alerts = self.query_one("#alerts", RichLog)
+        idx = table.cursor_row
+        if idx is None or idx < 0 or idx >= len(self._scored):
+            return
+
+        ms = self._scored[idx]
+        portfolio = self.engine.portfolio
+
+        if portfolio.has(ms.market.id):
+            alerts.write(Text(f" Already tracking: {ms.market.question[:50]}", style="yellow"))
+            return
+
+        # Use the pick direction to determine side, and current price as entry
+        side = ms.pick_label
+        price_idx = 0 if ms.pick_is_yes else (1 if len(ms.market.outcome_prices) > 1 else 0)
+        entry_price = ms.market.outcome_prices[price_idx] if ms.market.outcome_prices else 0.0
+
+        pos = Position(
+            market_id=ms.market.id,
+            question=ms.market.question,
+            side=side,
+            entry_price=entry_price,
+        )
+        portfolio.add(pos)
+
+        alerts.write(Text(
+            f" + TRACKED: {side} @ {entry_price:.2f} — {ms.market.question[:50]}",
+            style="bold cyan",
+        ))
+        self._rebuild_table()
+        self._show_detail()
+
+    def action_remove_position(self) -> None:
+        """Stop tracking the selected market position."""
+        table = self.query_one("#scanner", DataTable)
+        alerts = self.query_one("#alerts", RichLog)
+        idx = table.cursor_row
+        if idx is None or idx < 0 or idx >= len(self._scored):
+            return
+
+        ms = self._scored[idx]
+        removed = self.engine.portfolio.remove(ms.market.id)
+        if removed:
+            pnl = removed.pnl_pct
+            style = "bold green" if pnl >= 0 else "bold red"
+            alerts.write(Text(
+                f" - SOLD: {removed.side} {removed.entry_price:.2f} -> {removed.current_price:.2f} "
+                f"({pnl:+.1%}) — {ms.market.question[:40]}",
+                style=style,
+            ))
+            self._rebuild_table()
+            self._show_detail()
+        else:
+            alerts.write(Text(f" Not tracking: {ms.market.question[:50]}", style="dim"))
 
     async def action_force_refresh(self) -> None:
         await self._do_refresh()

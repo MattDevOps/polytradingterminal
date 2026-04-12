@@ -13,6 +13,7 @@ from .factors.disposition import compute_disposition
 from .factors.pairs import PairSignal, compute_pairs
 from .factors.velocity import compute_velocity
 from .models import FactorScore, Market, MarketScore, Signal
+from .portfolio import Portfolio
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class Engine:
         self.api = PolymarketAPI()
         self.state = EngineState()
         self._prev_signals: dict[str, Signal] = {}
+        self.portfolio = Portfolio()
 
     async def close(self) -> None:
         await self.api.close()
@@ -121,6 +123,25 @@ class Engine:
             self.state.alerts.append(
                 f"↔ PAIR z={ps.z_score}: {a_name[:30]} / {b_name[:30]}"
             )
+
+        # 6. Portfolio P&L tracking
+        if self.portfolio.positions:
+            prices_map: dict[str, list[float]] = {}
+            outcomes_map: dict[str, list[str]] = {}
+            for m in markets:
+                prices_map[m.id] = m.outcome_prices
+                outcomes_map[m.id] = m.outcomes
+            pnl_alerts = self.portfolio.update_prices(prices_map, outcomes_map)
+            self.state.alerts.extend(pnl_alerts)
+
+            # Also alert if a held position's signal degrades to EXIT
+            for ms in scored:
+                pos = self.portfolio.get(ms.market.id)
+                if pos and ms.signal == Signal.EXIT:
+                    self.state.alerts.append(
+                        f"! SELL {pos.side}: {pos.question[:40]} "
+                        f"— signal EXIT + P&L {pos.pnl_pct:+.0%}"
+                    )
 
     # ------------------------------------------------------------------
     # Data enrichment

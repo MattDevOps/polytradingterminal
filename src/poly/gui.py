@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from .engine import Engine, EngineState
 from .models import MarketScore, Signal
+from .portfolio import Portfolio, Position
 
 if TYPE_CHECKING:
     pass
@@ -299,12 +300,31 @@ class PolyGUI:
                                     foreground=ACCENT)
         self._detail.tag_configure("link", foreground=ACCENT, underline=True,
                                     font=("Consolas", 10))
+        self._detail.tag_configure("pos_header", font=("Consolas", 11, "bold"),
+                                    foreground="#58a6ff")
+        self._detail.tag_configure("pos_green", font=("Consolas", 11, "bold"),
+                                    foreground=GREEN)
+        self._detail.tag_configure("pos_red", font=("Consolas", 11, "bold"),
+                                    foreground=RED)
 
-        # "View on Polymarket" button below detail panel
-        self._poly_btn = ttk.Button(parent, text="View on Polymarket",
+        # Buttons below detail panel
+        btn_row = tk.Frame(parent, bg=BG)
+        btn_row.pack(fill="x", padx=8, pady=(2, 6))
+
+        self._poly_btn = ttk.Button(btn_row, text="View on Polymarket",
                                      style="Action.TButton",
                                      command=self._open_polymarket)
-        self._poly_btn.pack(fill="x", padx=8, pady=(2, 6))
+        self._poly_btn.pack(side="left", expand=True, fill="x", padx=(0, 2))
+
+        self._buy_btn = ttk.Button(btn_row, text="Buy / Track",
+                                    style="Action.TButton",
+                                    command=self._add_position)
+        self._buy_btn.pack(side="left", expand=True, fill="x", padx=2)
+
+        self._sell_btn = ttk.Button(btn_row, text="Sell / Untrack",
+                                     style="Action.TButton",
+                                     command=self._remove_position)
+        self._sell_btn.pack(side="left", expand=True, fill="x", padx=(2, 0))
 
     def _build_alerts(self, parent: tk.Frame) -> None:
         hdr = tk.Label(parent, text="  SIGNALS & ALERTS", anchor="w",
@@ -317,10 +337,12 @@ class PolyGUI:
                                 padx=8, pady=4, cursor="arrow", state="disabled")
         self._alerts.pack(fill="x")
 
-        self._alerts.tag_configure("up",   foreground=GREEN)
-        self._alerts.tag_configure("down", foreground=RED)
-        self._alerts.tag_configure("pair", foreground="#58a6ff")
-        self._alerts.tag_configure("dim",  foreground=FG_DIM)
+        self._alerts.tag_configure("up",     foreground=GREEN)
+        self._alerts.tag_configure("down",   foreground=RED)
+        self._alerts.tag_configure("pair",   foreground="#58a6ff")
+        self._alerts.tag_configure("dim",    foreground=FG_DIM)
+        self._alerts.tag_configure("profit", foreground=GREEN, font=("Consolas", 9, "bold"))
+        self._alerts.tag_configure("loss",   foreground=RED, font=("Consolas", 9, "bold"))
 
     # ── Data refresh ─────────────────────────────────────────────────
 
@@ -346,9 +368,13 @@ class PolyGUI:
         self._scored = state.markets
 
         # Rebuild table
+        portfolio = self._engine.portfolio
         self._tree.delete(*self._tree.get_children())
         for ms in self._scored:
             q = ms.market.question
+            held = portfolio.has(ms.market.id)
+            if held:
+                q = "* " + q
             if len(q) > 45:
                 q = q[:43] + ".."
             price = ms.market.outcome_prices[0] if ms.market.outcome_prices else 0.0
@@ -358,11 +384,18 @@ class PolyGUI:
                 label = label[:12] + ".."
             pick_str = f">> {label} <<"
 
+            # Show P&L next to price if position is held
+            if held:
+                pos = portfolio.get(ms.market.id)
+                price_str = f"{price:.2f} ({pos.pnl_pct:+.0%})" if pos else f"{price:.2f}"
+            else:
+                price_str = f"{price:.2f}"
+
             self._tree.insert("", "end", values=(
                 f"{ms.composite:.3f}",
                 q,
                 pick_str,
-                f"{price:.2f}",
+                price_str,
                 f"{ms.divergence.value:.2f}",
                 f"{ms.disposition.value:.2f}",
                 f"{ms.velocity.value:.2f}",
@@ -382,7 +415,11 @@ class PolyGUI:
         if state.error:
             self._alerts.insert("end", f"Error: {state.error}\n", "down")
         for a in state.alerts:
-            if "\u25b2" in a:
+            if "$ PROFIT" in a:
+                tag = "profit"
+            elif "! LOSS" in a or "! SELL" in a:
+                tag = "loss"
+            elif "\u25b2" in a:
                 tag = "up"
             elif "\u25bc" in a:
                 tag = "down"
@@ -459,6 +496,21 @@ class PolyGUI:
         d.insert("end", f"    Vol24h ${m.volume_24h:,.0f}", "dim")
         d.insert("end", f"    Liq ${m.liquidity:,.0f}\n", "dim")
 
+        # Position P&L (if held)
+        pos = self._engine.portfolio.get(m.id)
+        if pos is not None:
+            pnl_tag = "pos_green" if pos.pnl_pct >= 0 else "pos_red"
+            d.insert("end", "\n")
+            d.insert("end", "  -- YOUR POSITION --\n", "pos_header")
+            d.insert("end", f"  Side   {pos.side}\n", "label")
+            d.insert("end", f"  Entry  {pos.entry_price:.2f}", "label")
+            d.insert("end", f"  ->  Now  {pos.current_price:.2f}\n", "label")
+            d.insert("end", f"  P&L    ", "label")
+            d.insert("end", f"{pos.pnl_pct:+.1%}", pnl_tag)
+            if pos.shares != 1.0:
+                d.insert("end", f"  (${pos.pnl_abs:+.2f} on {pos.shares:.0f} shares)", pnl_tag)
+            d.insert("end", "\n")
+
         if m.spread:
             d.insert("end", f"Spread {m.spread:.4f}", "dim")
             d.insert("end", f"    Bid {m.best_bid:.2f}  Ask {m.best_ask:.2f}\n", "dim")
@@ -500,6 +552,158 @@ class PolyGUI:
                              f"{ps.direction}\n", "dim")
 
         d.configure(state="disabled")
+
+    # ── Portfolio actions ────────────────────────────────────────────
+
+    def _get_selected_ms(self) -> MarketScore | None:
+        sel = self._tree.selection()
+        if not sel:
+            return None
+        idx = self._tree.index(sel[0])
+        if 0 <= idx < len(self._scored):
+            return self._scored[idx]
+        return None
+
+    def _add_position(self) -> None:
+        """Open a dialog to record a buy with entry price."""
+        ms = self._get_selected_ms()
+        if ms is None:
+            return
+
+        portfolio = self._engine.portfolio
+        if portfolio.has(ms.market.id):
+            self._alert_write(f"Already tracking: {ms.market.question[:50]}", "loss")
+            return
+
+        # Build the dialog
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Track Position")
+        dlg.geometry("400x280")
+        dlg.configure(bg=BG)
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+        dlg.grab_set()
+
+        # Center on parent
+        dlg.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - 400) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 280) // 2
+        dlg.geometry(f"+{x}+{y}")
+
+        tk.Label(dlg, text="Track Position", bg=BG, fg=ACCENT,
+                 font=("Consolas", 12, "bold")).pack(pady=(12, 4))
+
+        q = ms.market.question
+        if len(q) > 50:
+            q = q[:48] + ".."
+        tk.Label(dlg, text=q, bg=BG, fg=FG, font=("Consolas", 9),
+                 wraplength=380).pack(pady=(0, 8))
+
+        # Side selection
+        side_frame = tk.Frame(dlg, bg=BG)
+        side_frame.pack(pady=4)
+        tk.Label(side_frame, text="Side:", bg=BG, fg=FG,
+                 font=("Consolas", 10)).pack(side="left", padx=(0, 8))
+
+        side_var = tk.StringVar(value=ms.pick_label)
+        outcomes = ms.market.outcomes or ["Yes", "No"]
+        for outcome in outcomes:
+            tk.Radiobutton(side_frame, text=outcome, variable=side_var,
+                           value=outcome, bg=BG, fg=FG, selectcolor=BG_ALT,
+                           activebackground=BG, activeforeground=GREEN,
+                           font=("Consolas", 10)).pack(side="left", padx=4)
+
+        # Entry price
+        price_frame = tk.Frame(dlg, bg=BG)
+        price_frame.pack(pady=4)
+        tk.Label(price_frame, text="Entry price:", bg=BG, fg=FG,
+                 font=("Consolas", 10)).pack(side="left", padx=(0, 8))
+
+        current_price = ms.market.outcome_prices[0] if ms.market.outcome_prices else 0.0
+        price_var = tk.StringVar(value=f"{current_price:.2f}")
+        price_entry = tk.Entry(price_frame, textvariable=price_var, width=10,
+                               bg=BG_ALT, fg=FG, font=("Consolas", 11),
+                               insertbackground=FG, relief="solid", bd=1)
+        price_entry.pack(side="left")
+        price_entry.select_range(0, "end")
+        price_entry.focus_set()
+
+        # Shares
+        shares_frame = tk.Frame(dlg, bg=BG)
+        shares_frame.pack(pady=4)
+        tk.Label(shares_frame, text="Shares:", bg=BG, fg=FG,
+                 font=("Consolas", 10)).pack(side="left", padx=(0, 8))
+
+        shares_var = tk.StringVar(value="1")
+        shares_entry = tk.Entry(shares_frame, textvariable=shares_var, width=10,
+                                bg=BG_ALT, fg=FG, font=("Consolas", 11),
+                                insertbackground=FG, relief="solid", bd=1)
+        shares_entry.pack(side="left")
+
+        # Confirm / Cancel
+        def confirm():
+            try:
+                entry_price = float(price_var.get())
+                shares = float(shares_var.get())
+            except ValueError:
+                tk.Label(dlg, text="Invalid number", bg=BG, fg=RED,
+                         font=("Consolas", 9)).pack()
+                return
+
+            pos = Position(
+                market_id=ms.market.id,
+                question=ms.market.question,
+                side=side_var.get(),
+                entry_price=entry_price,
+                shares=shares,
+            )
+            portfolio.add(pos)
+            self._alert_write(
+                f"+ TRACKED: {pos.side} x{shares:.0f} @ {entry_price:.2f} -- "
+                f"{ms.market.question[:40]}",
+                "profit",
+            )
+            dlg.destroy()
+            # Refresh the table and detail to show the position
+            self._apply_state(self._state) if self._state else None
+
+        btn_frame = tk.Frame(dlg, bg=BG)
+        btn_frame.pack(pady=12)
+        ttk.Button(btn_frame, text="Track", style="Action.TButton",
+                   command=confirm).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Cancel", style="Action.TButton",
+                   command=dlg.destroy).pack(side="left", padx=4)
+
+        dlg.bind("<Return>", lambda _: confirm())
+        dlg.bind("<Escape>", lambda _: dlg.destroy())
+
+    def _remove_position(self) -> None:
+        """Remove the selected market from the portfolio."""
+        ms = self._get_selected_ms()
+        if ms is None:
+            return
+
+        removed = self._engine.portfolio.remove(ms.market.id)
+        if removed:
+            pnl = removed.pnl_pct
+            tag = "profit" if pnl >= 0 else "loss"
+            self._alert_write(
+                f"- SOLD: {removed.side} {removed.entry_price:.2f} -> "
+                f"{removed.current_price:.2f} ({pnl:+.1%}) -- "
+                f"{ms.market.question[:40]}",
+                tag,
+            )
+            if self._state:
+                self._apply_state(self._state)
+        else:
+            self._alert_write(f"Not tracking: {ms.market.question[:50]}", "dim")
+
+    def _alert_write(self, text: str, tag: str) -> None:
+        """Write a line to the alerts panel."""
+        self._alerts.configure(state="normal")
+        self._alerts.insert("end", text + "\n", tag)
+        self._alerts.configure(state="disabled")
+        self._alerts.see("end")
 
     # ── Lifecycle ────────────────────────────────────────────────────
 

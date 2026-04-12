@@ -40,6 +40,18 @@ def run() -> None:
         help="Run one scan cycle and send a toast notification on ENTER/STRONG ENTER signals",
     )
     parser.add_argument(
+        "--portfolio", action="store_true",
+        help="Show current portfolio positions and P&L",
+    )
+    parser.add_argument(
+        "--add-position", nargs=3, metavar=("MARKET_ID", "SIDE", "PRICE"),
+        help="Add a position: --add-position <market_id> <YES|NO|name> <entry_price>",
+    )
+    parser.add_argument(
+        "--remove-position", metavar="MARKET_ID",
+        help="Remove a position by market ID",
+    )
+    parser.add_argument(
         "--debug", action="store_true",
         help="Enable debug logging",
     )
@@ -50,6 +62,10 @@ def run() -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
+    if args.portfolio or args.add_position or args.remove_position:
+        _portfolio_cli(args)
+        return
+
     if args.scan:
         from .scanner import run_scan
         run_scan()
@@ -59,6 +75,50 @@ def run() -> None:
         _launch_gui()
     else:
         _launch_tui()
+
+
+def _portfolio_cli(args) -> None:
+    from .portfolio import Portfolio, Position
+
+    portfolio = Portfolio()
+
+    if args.add_position:
+        market_id, side, price_str = args.add_position
+        pos = Position(
+            market_id=market_id,
+            question=market_id,  # will show ID if we don't have the name
+            side=side,
+            entry_price=float(price_str),
+        )
+        portfolio.add(pos)
+        print(f"Added: {side} @ {float(price_str):.2f} for market {market_id}")
+        return
+
+    if args.remove_position:
+        removed = portfolio.remove(args.remove_position)
+        if removed:
+            print(f"Removed: {removed.side} @ {removed.entry_price:.2f} — {removed.question}")
+        else:
+            print(f"No position found for market {args.remove_position}")
+        return
+
+    # --portfolio: list all positions
+    if not portfolio.positions:
+        print("No positions tracked. Use 'b' in the TUI to track a market, or --add-position.")
+        return
+
+    print(f"{'SIDE':<16} {'ENTRY':>6} {'NOW':>6} {'P&L':>8}  MARKET")
+    print("─" * 80)
+    for p in portfolio.positions:
+        pnl_str = f"{p.pnl_pct:+.1%}" if p.current_price > 0 else "  n/a"
+        now_str = f"{p.current_price:.2f}" if p.current_price > 0 else "  —"
+        q = p.question
+        if len(q) > 45:
+            q = q[:43] + ".."
+        print(f"{p.side:<16} {p.entry_price:6.2f} {now_str:>6} {pnl_str:>8}  {q}")
+
+    print(f"\n{len(portfolio.positions)} position(s) tracked")
+    print("Tip: Run the TUI to see live P&L updates")
 
 
 def _launch_tui() -> None:
