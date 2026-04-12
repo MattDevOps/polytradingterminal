@@ -227,6 +227,7 @@ class PolyTerminal(App):
         Binding("b", "add_position", "Buy/Track"),
         Binding("e", "edit_position", "Edit Position"),
         Binding("s", "remove_position", "Sell/Untrack"),
+        Binding("z", "undo", "Undo"),
     ]
 
     def __init__(self) -> None:
@@ -459,6 +460,17 @@ class PolyTerminal(App):
             self._show_detail()
         else:
             alerts.write(Text(f" Not tracking: {ms.market.question[:50]}", style="dim"))
+
+    def action_undo(self) -> None:
+        """Undo the most recent portfolio action."""
+        alerts = self.query_one("#alerts", RichLog)
+        result = self.engine.portfolio.undo()
+        if result:
+            alerts.write(Text(f" UNDO: {result}", style="bold yellow"))
+            self._rebuild_table()
+            self._show_detail()
+        else:
+            alerts.write(Text(" Nothing to undo", style="dim"))
 
     async def action_force_refresh(self) -> None:
         await self._do_refresh()

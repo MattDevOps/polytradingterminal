@@ -334,7 +334,12 @@ class PolyGUI:
         self._sell_btn = ttk.Button(btn_row, text="Sell / Untrack",
                                      style="Action.TButton",
                                      command=self._remove_position)
-        self._sell_btn.pack(side="left", expand=True, fill="x", padx=(2, 0))
+        self._sell_btn.pack(side="left", expand=True, fill="x", padx=2)
+
+        self._undo_btn = ttk.Button(btn_row, text="Undo",
+                                     style="Action.TButton",
+                                     command=self._undo_action)
+        self._undo_btn.pack(side="left", expand=True, fill="x", padx=(2, 0))
 
     def _build_alerts(self, parent: tk.Frame) -> None:
         hdr = tk.Label(parent, text="  SIGNALS & ALERTS", anchor="w",
@@ -795,6 +800,16 @@ class PolyGUI:
                 self._apply_state(self._state)
         else:
             self._alert_write(f"Not tracking: {ms.market.question[:50]}", "dim")
+
+    def _undo_action(self) -> None:
+        """Undo the most recent portfolio action."""
+        result = self._engine.portfolio.undo()
+        if result:
+            self._alert_write(f"UNDO: {result}", "profit")
+            if self._state:
+                self._apply_state(self._state)
+        else:
+            self._alert_write("Nothing to undo", "dim")
 
     def _alert_write(self, text: str, tag: str) -> None:
         """Write a line to the alerts panel."""

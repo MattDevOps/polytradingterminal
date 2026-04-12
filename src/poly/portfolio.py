@@ -7,6 +7,7 @@ import logging
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ class Portfolio:
         self.path = path or DEFAULT_PATH
         self.positions: list[Position] = []
         self._alerted: dict[str, set[float]] = {}  # market_id -> set of targets already alerted
+        self._last_action: dict[str, Any] | None = None  # for undo
         self.load()
 
     # ── persistence ──────────────────────────────────────────────────
@@ -117,6 +119,7 @@ class Portfolio:
 
     def add(self, position: Position) -> None:
         self.positions.append(position)
+        self._last_action = {"type": "add", "market_id": position.market_id}
         self.save()
 
     def remove(self, market_id: str) -> Position | None:
@@ -124,6 +127,7 @@ class Portfolio:
             if p.market_id == market_id:
                 removed = self.positions.pop(i)
                 self._alerted.pop(market_id, None)
+                self._last_action = {"type": "remove", "position": removed, "index": i}
                 self.save()
                 return removed
         return None
@@ -139,11 +143,49 @@ class Portfolio:
         pos = self.get(market_id)
         if pos is None:
             return None
+        old_vals = {k: getattr(pos, k) for k in kwargs if hasattr(pos, k)}
         for k, v in kwargs.items():
             if hasattr(pos, k):
                 setattr(pos, k, v)
+        self._last_action = {"type": "update", "market_id": market_id, "old": old_vals}
         self.save()
         return pos
+
+    def undo(self) -> str | None:
+        """Undo the most recent add/remove/update. Returns a description or None."""
+        if self._last_action is None:
+            return None
+
+        act = self._last_action
+        self._last_action = None
+
+        if act["type"] == "remove":
+            pos: Position = act["position"]
+            idx = min(act["index"], len(self.positions))
+            self.positions.insert(idx, pos)
+            self.save()
+            return f"Restored: {pos.side} @ {pos.entry_price:.2f} — {pos.question[:40]}"
+
+        if act["type"] == "add":
+            mid = act["market_id"]
+            for i, p in enumerate(self.positions):
+                if p.market_id == mid:
+                    self.positions.pop(i)
+                    self.save()
+                    return f"Untracked: {p.question[:40]}"
+            return None
+
+        if act["type"] == "update":
+            pos = self.get(act["market_id"])
+            if pos is None:
+                return None
+            old = act["old"]
+            for k, v in old.items():
+                setattr(pos, k, v)
+            self.save()
+            return f"Reverted edit: {pos.question[:40]}"
+
+        return None
 
     def has(self, market_id: str) -> bool:
         return any(p.market_id == market_id for p in self.positions)
