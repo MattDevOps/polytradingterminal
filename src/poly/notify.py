@@ -55,8 +55,23 @@ def _patch_winotify() -> None:
     _wn._run_ps = _quiet_run_ps
 
 
+def _gui_is_open() -> bool:
+    """Return True if the GUI window is currently running."""
+    if sys.platform != "win32":
+        return False
+    try:
+        from ctypes import windll
+        hwnd = windll.user32.FindWindowW(None, "POLY TRADING TERMINAL")
+        return bool(hwnd)
+    except Exception:
+        return False
+
+
 def send_toast(title: str, body: str, url: str | None = None) -> None:
-    """Send a Windows toast notification. Silently falls back to console."""
+    """Send a Windows toast notification. Suppressed when the GUI is open."""
+    if _gui_is_open():
+        log.debug("GUI is open – suppressing toast")
+        return
     try:
         from winotify import Notification
 

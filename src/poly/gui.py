@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 
 from .engine import Engine, EngineState
 from .models import MarketScore, Signal
-from .notify import send_toast
 from .portfolio import Portfolio, Position
 
 if TYPE_CHECKING:
@@ -125,8 +124,6 @@ class PolyGUI:
         self._scored: list[MarketScore] = []
         self._state: EngineState | None = None
         self._refresh_job: str | None = None
-        self._notified_enters: set[str] = set()  # market IDs already toasted
-        self._pending_clear: set[str] = set()   # IDs that left ENTER last cycle
         self._notification_log: list[tuple[str, str, str]] = []  # (timestamp, text, tag)
 
         self._build_styles()
@@ -454,37 +451,6 @@ class PolyGUI:
         if children:
             self._tree.selection_set(children[0])
             self._tree.focus(children[0])
-
-        # Desktop notifications for new ENTER signals
-        _ENTER_SIGNALS = {Signal.ENTER, Signal.STRONG_ENTER}
-        new_enters = [
-            ms for ms in self._scored
-            if ms.signal in _ENTER_SIGNALS and ms.market.id not in self._notified_enters
-        ]
-        if new_enters:
-            lines: list[str] = []
-            for ms in new_enters[:5]:
-                q = ms.market.question
-                if len(q) > 50:
-                    q = q[:48] + "..."
-                lines.append(f"[{ms.signal.value}] BUY {ms.pick_label} — {q}  (score {ms.composite:.2f})")
-                self._notified_enters.add(ms.market.id)
-            title = f"Poly Terminal: {len(new_enters)} signal{'s' if len(new_enters) != 1 else ''} found"
-            body = "\n".join(lines)
-            if len(new_enters) > 5:
-                body += f"\n...and {len(new_enters) - 5} more"
-                for ms in new_enters[5:]:
-                    self._notified_enters.add(ms.market.id)
-            slug = new_enters[0].market.event_slug or new_enters[0].market.slug
-            url = f"https://polymarket.com/event/{slug}" if slug else None
-            send_toast(title, body, url=url)
-
-        # Only re-notify if a market drops out of ENTER for two
-        # consecutive cycles, preventing repeated toasts from score jitter.
-        current_enter_ids = {ms.market.id for ms in self._scored if ms.signal in _ENTER_SIGNALS}
-        gone = self._notified_enters - current_enter_ids
-        self._notified_enters -= (gone & self._pending_clear)
-        self._pending_clear = gone
 
         # Capture important alerts to persistent notification log
         now = datetime.now().strftime("%H:%M:%S")
@@ -922,10 +888,35 @@ class PolyGUI:
         self.root.mainloop()
 
 
+def _focus_existing_window() -> bool:
+    """If a GUI instance is already running, bring it to the foreground.
+
+    Returns True if an existing window was found (caller should exit).
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        from ctypes import windll
+        user32 = windll.user32
+        hwnd = user32.FindWindowW(None, "POLY TRADING TERMINAL")
+        if hwnd:
+            SW_RESTORE = 9
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            user32.SetForegroundWindow(hwnd)
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def launch_gui() -> None:
     """Entry point for the GUI."""
     import sys
     import warnings
+
+    # Single-instance guard: focus the existing window instead of opening another
+    if _focus_existing_window():
+        return
 
     warnings.filterwarnings("ignore", category=RuntimeWarning, module="numpy")
 
