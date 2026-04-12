@@ -25,6 +25,7 @@ REFRESH_FAST = 15
 async def _loop() -> None:
     engine = Engine()
     notified: set[str] = set()  # market IDs already toasted
+    pending_clear: set[str] = set()  # IDs that left ENTER last cycle
 
     try:
         while True:
@@ -72,12 +73,14 @@ async def _loop() -> None:
                 url = f"https://polymarket.com/event/{slug}" if slug else None
                 send_toast(title, body, url=url)
 
-            # Clear tracked IDs for markets that dropped below ENTER so they
-            # can re-trigger if the signal comes back.
+            # Only re-notify if a market drops out of ENTER for two
+            # consecutive cycles, preventing repeated toasts from score jitter.
             current_enter_ids = {
                 ms.market.id for ms in state.markets if ms.signal in ALERT_SIGNALS
             }
-            notified &= current_enter_ids
+            gone = notified - current_enter_ids
+            notified -= (gone & pending_clear)
+            pending_clear = gone
 
             interval = REFRESH_FAST if state.closing_soon else REFRESH_NORMAL
             log.debug(

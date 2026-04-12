@@ -21,8 +21,15 @@ def _patch_winotify() -> None:
     def _quiet_run_ps(*, file="", command=""):
         si = subprocess.STARTUPINFO()
         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
 
-        cmd = ["powershell.exe", "-ExecutionPolicy", "Bypass"]
+        cmd = [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle", "Hidden",
+            "-ExecutionPolicy", "Bypass",
+        ]
         if file and command:
             raise ValueError
         elif file:

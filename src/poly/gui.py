@@ -12,6 +12,7 @@ import threading
 import time
 import tkinter as tk
 import webbrowser
+from datetime import datetime
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
@@ -125,6 +126,8 @@ class PolyGUI:
         self._state: EngineState | None = None
         self._refresh_job: str | None = None
         self._notified_enters: set[str] = set()  # market IDs already toasted
+        self._pending_clear: set[str] = set()   # IDs that left ENTER last cycle
+        self._notification_log: list[tuple[str, str, str]] = []  # (timestamp, text, tag)
 
         self._build_styles()
         self._build_ui()
@@ -215,11 +218,19 @@ class PolyGUI:
         paned.add(right, stretch="always", width=450)
         self._build_detail(right)
 
-        # Bottom: alerts
-        alerts_frame = tk.Frame(self.root, bg=BG_ALT, bd=1, relief="solid",
+        # Bottom: alerts + notification log
+        bottom = tk.Frame(self.root, bg=BG)
+        bottom.pack(fill="x", padx=4, pady=4)
+
+        alerts_frame = tk.Frame(bottom, bg=BG_ALT, bd=1, relief="solid",
                                  highlightbackground=BORDER, highlightthickness=1)
-        alerts_frame.pack(fill="x", padx=4, pady=4)
+        alerts_frame.pack(fill="x")
         self._build_alerts(alerts_frame)
+
+        log_frame = tk.Frame(bottom, bg=BG_ALT, bd=1, relief="solid",
+                              highlightbackground=BORDER, highlightthickness=1)
+        log_frame.pack(fill="x", pady=(2, 0))
+        self._build_notification_log(log_frame)
 
     def _build_scanner(self, parent: tk.Frame) -> None:
         hdr = tk.Label(parent, text="  MARKET SCANNER", anchor="w",
@@ -362,6 +373,22 @@ class PolyGUI:
         self._alerts.tag_configure("profit", foreground=GREEN, font=("Consolas", 9, "bold"))
         self._alerts.tag_configure("loss",   foreground=RED, font=("Consolas", 9, "bold"))
 
+    def _build_notification_log(self, parent: tk.Frame) -> None:
+        hdr = tk.Label(parent, text="  NOTIFICATION LOG", anchor="w",
+                       bg=ACCENT, fg="#ffffff", font=("Consolas", 10, "bold"))
+        hdr.pack(fill="x")
+
+        self._notif_log = tk.Text(parent, bg=BG_ALT, fg=FG, wrap="word",
+                                   font=("Consolas", 9), bd=0,
+                                   highlightthickness=0, height=5,
+                                   padx=8, pady=4, cursor="arrow", state="disabled")
+        self._notif_log.pack(fill="x")
+
+        self._notif_log.tag_configure("profit", foreground=GREEN, font=("Consolas", 9, "bold"))
+        self._notif_log.tag_configure("loss",   foreground=RED, font=("Consolas", 9, "bold"))
+        self._notif_log.tag_configure("ts",     foreground=FG_DIM)
+        self._notif_log.tag_configure("empty",  foreground=FG_DIM)
+
     # ── Data refresh ─────────────────────────────────────────────────
 
     def _initial_refresh(self) -> None:
@@ -452,9 +479,38 @@ class PolyGUI:
             url = f"https://polymarket.com/event/{slug}" if slug else None
             send_toast(title, body, url=url)
 
-        # Clear tracked IDs for markets that are no longer ENTER
+        # Only re-notify if a market drops out of ENTER for two
+        # consecutive cycles, preventing repeated toasts from score jitter.
         current_enter_ids = {ms.market.id for ms in self._scored if ms.signal in _ENTER_SIGNALS}
-        self._notified_enters &= current_enter_ids
+        gone = self._notified_enters - current_enter_ids
+        self._notified_enters -= (gone & self._pending_clear)
+        self._pending_clear = gone
+
+        # Capture important alerts to persistent notification log
+        now = datetime.now().strftime("%H:%M:%S")
+        for a in state.alerts:
+            if "$ PROFIT" in a:
+                self._notification_log.append((now, a, "profit"))
+            elif a.startswith("✓") or a.startswith("✗"):
+                tag = "profit" if a.startswith("✓") else "loss"
+                self._notification_log.append((now, a, tag))
+            elif "! SELL" in a:
+                self._notification_log.append((now, a, "loss"))
+
+        # Keep last 50 entries
+        self._notification_log = self._notification_log[-50:]
+
+        # Update notification log display
+        self._notif_log.configure(state="normal")
+        self._notif_log.delete("1.0", "end")
+        if not self._notification_log:
+            self._notif_log.insert("end", "No notifications yet\n", "empty")
+        else:
+            for ts, text, tag in self._notification_log:
+                self._notif_log.insert("end", f"[{ts}] ", "ts")
+                self._notif_log.insert("end", text + "\n", tag)
+        self._notif_log.configure(state="disabled")
+        self._notif_log.see("end")
 
         # Update alerts
         self._alerts.configure(state="normal")

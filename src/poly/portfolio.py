@@ -227,17 +227,23 @@ class Portfolio:
                 if pos.pnl_pct >= target and target not in self._alerted[pos.market_id]:
                     self._alerted[pos.market_id].add(target)
                     pct = target * 100
+                    cost = pos.entry_price * pos.shares
+                    value = pos.current_price * pos.shares
                     alerts.append(
                         f"$ PROFIT +{pct:.0f}%: {pos.question[:40]} "
-                        f"({pos.side} {pos.entry_price:.2f} -> {pos.current_price:.2f})"
+                        f"({pos.side} {pos.entry_price:.2f} -> {pos.current_price:.2f}, "
+                        f"${cost:.2f} -> ${value:.2f} on {pos.shares:g} shares)"
                     )
 
             # Loss warning (only once)
             if pos.pnl_pct <= LOSS_WARN and LOSS_WARN not in self._alerted[pos.market_id]:
                 self._alerted[pos.market_id].add(LOSS_WARN)
+                cost = pos.entry_price * pos.shares
+                value = pos.current_price * pos.shares
                 alerts.append(
                     f"! LOSS {pos.pnl_pct:+.0%}: {pos.question[:40]} "
-                    f"({pos.side} {pos.entry_price:.2f} -> {pos.current_price:.2f})"
+                    f"({pos.side} {pos.entry_price:.2f} -> {pos.current_price:.2f}, "
+                    f"${cost:.2f} -> ${value:.2f} on {pos.shares:g} shares)"
                 )
 
         return alerts
