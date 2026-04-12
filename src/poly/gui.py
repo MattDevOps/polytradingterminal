@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from .engine import Engine, EngineState
 from .models import MarketScore, Signal
+from .notify import send_toast
 from .portfolio import Portfolio, Position
 
 if TYPE_CHECKING:
@@ -122,6 +123,7 @@ class PolyGUI:
         self._scored: list[MarketScore] = []
         self._state: EngineState | None = None
         self._refresh_job: str | None = None
+        self._notified_enters: set[str] = set()  # market IDs already toasted
 
         self._build_styles()
         self._build_ui()
@@ -424,6 +426,34 @@ class PolyGUI:
         if children:
             self._tree.selection_set(children[0])
             self._tree.focus(children[0])
+
+        # Desktop notifications for new ENTER signals
+        _ENTER_SIGNALS = {Signal.ENTER, Signal.STRONG_ENTER}
+        new_enters = [
+            ms for ms in self._scored
+            if ms.signal in _ENTER_SIGNALS and ms.market.id not in self._notified_enters
+        ]
+        if new_enters:
+            lines: list[str] = []
+            for ms in new_enters[:5]:
+                q = ms.market.question
+                if len(q) > 50:
+                    q = q[:48] + "..."
+                lines.append(f"[{ms.signal.value}] BUY {ms.pick_label} — {q}  (score {ms.composite:.2f})")
+                self._notified_enters.add(ms.market.id)
+            title = f"Poly Terminal: {len(new_enters)} signal{'s' if len(new_enters) != 1 else ''} found"
+            body = "\n".join(lines)
+            if len(new_enters) > 5:
+                body += f"\n...and {len(new_enters) - 5} more"
+                for ms in new_enters[5:]:
+                    self._notified_enters.add(ms.market.id)
+            slug = new_enters[0].market.event_slug or new_enters[0].market.slug
+            url = f"https://polymarket.com/event/{slug}" if slug else None
+            send_toast(title, body, url=url)
+
+        # Clear tracked IDs for markets that are no longer ENTER
+        current_enter_ids = {ms.market.id for ms in self._scored if ms.signal in _ENTER_SIGNALS}
+        self._notified_enters &= current_enter_ids
 
         # Update alerts
         self._alerts.configure(state="normal")
