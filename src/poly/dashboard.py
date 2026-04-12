@@ -8,7 +8,8 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, Footer, Header, RichLog, Static
+from textual.screen import ModalScreen
+from textual.widgets import Button, DataTable, Footer, Header, Input, Label, RichLog, Static
 
 from .engine import Engine, EngineState
 from .models import MarketScore, Signal
@@ -97,6 +98,73 @@ class DetailPanel(Static):
         self.update(t)
 
 
+# ── Edit position modal ──────────────────────────────────────────────────
+
+class EditPositionScreen(ModalScreen[tuple[float, float] | None]):
+    """A modal dialog to edit shares and entry price of an existing position."""
+
+    CSS = """
+    EditPositionScreen {
+        align: center middle;
+    }
+    #edit-dialog {
+        width: 50;
+        height: auto;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #edit-dialog Label {
+        width: 100%;
+        margin-bottom: 1;
+    }
+    #edit-dialog Input {
+        margin-bottom: 1;
+    }
+    #edit-buttons {
+        width: 100%;
+        height: auto;
+        align: center middle;
+        margin-top: 1;
+    }
+    #edit-buttons Button {
+        margin: 0 1;
+    }
+    """
+
+    def __init__(self, question: str, shares: float, entry_price: float) -> None:
+        super().__init__()
+        self._question = question
+        self._shares = shares
+        self._entry_price = entry_price
+
+    def compose(self) -> ComposeResult:
+        q = self._question[:48] + ".." if len(self._question) > 50 else self._question
+        with Vertical(id="edit-dialog"):
+            yield Label(f"Edit Position\n{q}")
+            yield Label("Entry price:")
+            yield Input(value=f"{self._entry_price:.2f}", id="edit-price")
+            yield Label("Shares:")
+            yield Input(value=f"{self._shares:g}", id="edit-shares")
+            with Horizontal(id="edit-buttons"):
+                yield Button("Save", variant="primary", id="edit-save")
+                yield Button("Cancel", id="edit-cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "edit-save":
+            try:
+                price = float(self.query_one("#edit-price", Input).value)
+                shares = float(self.query_one("#edit-shares", Input).value)
+            except ValueError:
+                return
+            self.dismiss((price, shares))
+        else:
+            self.dismiss(None)
+
+    def key_escape(self) -> None:
+        self.dismiss(None)
+
+
 # ── Main application ─────────────────────────────────────────────────────
 
 class PolyTerminal(App):
@@ -150,6 +218,7 @@ class PolyTerminal(App):
         Binding("r", "force_refresh", "Refresh"),
         Binding("o", "open_market", "Open in Browser"),
         Binding("b", "add_position", "Buy/Track"),
+        Binding("e", "edit_position", "Edit Position"),
         Binding("s", "remove_position", "Sell/Untrack"),
     ]
 
@@ -232,9 +301,15 @@ class PolyTerminal(App):
             else:
                 price_text = Text(f"{price:.2f}", style="bold")
 
+            # Style market name with obvious highlight if position is held
+            if held:
+                q_text = Text(q, style="bold green on #1a2f1a")
+            else:
+                q_text = q
+
             table.add_row(
                 _bar(ms.composite, 3),
-                q,
+                q_text,
                 pick_text,
                 price_text,
                 _sig_text(ms.signal),
@@ -298,6 +373,38 @@ class PolyTerminal(App):
         ))
         self._rebuild_table()
         self._show_detail()
+
+    def action_edit_position(self) -> None:
+        """Edit shares or entry price on the selected position."""
+        table = self.query_one("#scanner", DataTable)
+        alerts = self.query_one("#alerts", RichLog)
+        idx = table.cursor_row
+        if idx is None or idx < 0 or idx >= len(self._scored):
+            return
+
+        ms = self._scored[idx]
+        pos = self.engine.portfolio.get(ms.market.id)
+        if pos is None:
+            alerts.write(Text(f" Not tracking: {ms.market.question[:50]}", style="dim"))
+            return
+
+        def on_result(result: tuple[float, float] | None) -> None:
+            if result is None:
+                return
+            entry_price, shares = result
+            self.engine.portfolio.update(ms.market.id, entry_price=entry_price, shares=shares)
+            alerts.write(Text(
+                f" ~ EDITED: {pos.side} x{shares:.0f} @ {entry_price:.2f} — "
+                f"{ms.market.question[:40]}",
+                style="bold cyan",
+            ))
+            self._rebuild_table()
+            self._show_detail()
+
+        self.push_screen(
+            EditPositionScreen(ms.market.question, pos.shares, pos.entry_price),
+            on_result,
+        )
 
     def action_remove_position(self) -> None:
         """Stop tracking the selected market position."""

@@ -40,6 +40,8 @@ RED        = "#f85149"
 BORDER     = "#30363d"
 HEADER_BG  = "#161b22"
 SELECT_BG  = "#1c3a5f"
+HELD_BG    = "#1a2f1a"          # Dark green tint for active trades
+HELD_FG    = "#58d68d"          # Bright green text for active trades
 
 SIG_COLORS = {
     Signal.STRONG_ENTER: GREEN,
@@ -261,6 +263,9 @@ class PolyGUI:
         self._tree.tag_configure("exit",         foreground=RED)
         self._tree.tag_configure("neutral",      foreground=FG_DIM)
 
+        # Held position rows — bright green text on dark green background
+        self._tree.tag_configure("held", background=HELD_BG, foreground=HELD_FG)
+
     def _build_detail(self, parent: tk.Frame) -> None:
         hdr = tk.Label(parent, text="  FACTOR ANALYSIS", anchor="w",
                        bg=ACCENT, fg="#ffffff", font=("Consolas", 10, "bold"))
@@ -320,6 +325,11 @@ class PolyGUI:
                                     style="Action.TButton",
                                     command=self._add_position)
         self._buy_btn.pack(side="left", expand=True, fill="x", padx=2)
+
+        self._edit_btn = ttk.Button(btn_row, text="Edit Position",
+                                     style="Action.TButton",
+                                     command=self._edit_position)
+        self._edit_btn.pack(side="left", expand=True, fill="x", padx=2)
 
         self._sell_btn = ttk.Button(btn_row, text="Sell / Untrack",
                                      style="Action.TButton",
@@ -391,6 +401,7 @@ class PolyGUI:
             else:
                 price_str = f"{price:.2f}"
 
+            row_tags = (tag, "held") if held else (tag,)
             self._tree.insert("", "end", values=(
                 f"{ms.composite:.3f}",
                 q,
@@ -401,7 +412,7 @@ class PolyGUI:
                 f"{ms.velocity.value:.2f}",
                 f"{ms.pairs.value:.2f}",
                 ms.signal.value,
-            ), tags=(tag,))
+            ), tags=row_tags)
 
         # Select first row
         children = self._tree.get_children()
@@ -670,6 +681,93 @@ class PolyGUI:
         btn_frame = tk.Frame(dlg, bg=BG)
         btn_frame.pack(pady=12)
         ttk.Button(btn_frame, text="Track", style="Action.TButton",
+                   command=confirm).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Cancel", style="Action.TButton",
+                   command=dlg.destroy).pack(side="left", padx=4)
+
+        dlg.bind("<Return>", lambda _: confirm())
+        dlg.bind("<Escape>", lambda _: dlg.destroy())
+
+    def _edit_position(self) -> None:
+        """Open a dialog to edit shares and entry price of an existing position."""
+        ms = self._get_selected_ms()
+        if ms is None:
+            return
+
+        portfolio = self._engine.portfolio
+        pos = portfolio.get(ms.market.id)
+        if pos is None:
+            self._alert_write(f"Not tracking: {ms.market.question[:50]}", "dim")
+            return
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Edit Position")
+        dlg.geometry("400x220")
+        dlg.configure(bg=BG)
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+        dlg.grab_set()
+
+        dlg.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - 400) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 220) // 2
+        dlg.geometry(f"+{x}+{y}")
+
+        tk.Label(dlg, text="Edit Position", bg=BG, fg=ACCENT,
+                 font=("Consolas", 12, "bold")).pack(pady=(12, 4))
+
+        q = ms.market.question
+        if len(q) > 50:
+            q = q[:48] + ".."
+        tk.Label(dlg, text=q, bg=BG, fg=FG, font=("Consolas", 9),
+                 wraplength=380).pack(pady=(0, 8))
+
+        # Entry price
+        price_frame = tk.Frame(dlg, bg=BG)
+        price_frame.pack(pady=4)
+        tk.Label(price_frame, text="Entry price:", bg=BG, fg=FG,
+                 font=("Consolas", 10)).pack(side="left", padx=(0, 8))
+        price_var = tk.StringVar(value=f"{pos.entry_price:.2f}")
+        price_entry = tk.Entry(price_frame, textvariable=price_var, width=10,
+                               bg=BG_ALT, fg=FG, font=("Consolas", 11),
+                               insertbackground=FG, relief="solid", bd=1)
+        price_entry.pack(side="left")
+
+        # Shares
+        shares_frame = tk.Frame(dlg, bg=BG)
+        shares_frame.pack(pady=4)
+        tk.Label(shares_frame, text="Shares:     ", bg=BG, fg=FG,
+                 font=("Consolas", 10)).pack(side="left", padx=(0, 8))
+        shares_var = tk.StringVar(value=f"{pos.shares:g}")
+        shares_entry = tk.Entry(shares_frame, textvariable=shares_var, width=10,
+                                bg=BG_ALT, fg=FG, font=("Consolas", 11),
+                                insertbackground=FG, relief="solid", bd=1)
+        shares_entry.pack(side="left")
+        shares_entry.select_range(0, "end")
+        shares_entry.focus_set()
+
+        def confirm():
+            try:
+                entry_price = float(price_var.get())
+                shares = float(shares_var.get())
+            except ValueError:
+                tk.Label(dlg, text="Invalid number", bg=BG, fg=RED,
+                         font=("Consolas", 9)).pack()
+                return
+
+            portfolio.update(ms.market.id, entry_price=entry_price, shares=shares)
+            self._alert_write(
+                f"~ EDITED: {pos.side} x{shares:.0f} @ {entry_price:.2f} -- "
+                f"{ms.market.question[:40]}",
+                "profit",
+            )
+            dlg.destroy()
+            if self._state:
+                self._apply_state(self._state)
+
+        btn_frame = tk.Frame(dlg, bg=BG)
+        btn_frame.pack(pady=12)
+        ttk.Button(btn_frame, text="Save", style="Action.TButton",
                    command=confirm).pack(side="left", padx=4)
         ttk.Button(btn_frame, text="Cancel", style="Action.TButton",
                    command=dlg.destroy).pack(side="left", padx=4)

@@ -115,6 +115,17 @@ class Portfolio:
                 return p
         return None
 
+    def update(self, market_id: str, **kwargs) -> Position | None:
+        """Update fields on an existing position (e.g. shares, entry_price)."""
+        pos = self.get(market_id)
+        if pos is None:
+            return None
+        for k, v in kwargs.items():
+            if hasattr(pos, k):
+                setattr(pos, k, v)
+        self.save()
+        return pos
+
     def has(self, market_id: str) -> bool:
         return any(p.market_id == market_id for p in self.positions)
 
