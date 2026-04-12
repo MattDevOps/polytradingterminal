@@ -27,7 +27,7 @@ async def _scan() -> None:
         hits = [ms for ms in state.markets if ms.signal in ALERT_SIGNALS]
 
         if not hits:
-            log.info("Scanner: no ENTER/STRONG ENTER signals found (%d markets scanned)", len(state.markets))
+            print(f"Scan complete: {len(state.markets)} markets scanned — no ENTER/STRONG ENTER signals.")
             return
 
         # Build notification body
