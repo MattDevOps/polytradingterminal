@@ -13,6 +13,7 @@ from .factors.disposition import compute_disposition
 from .factors.pairs import PairSignal, compute_pairs
 from .factors.velocity import compute_velocity
 from .models import FactorScore, Market, MarketScore, Signal
+from .notify import send_toast
 from .portfolio import Portfolio
 
 log = logging.getLogger(__name__)
@@ -138,10 +139,23 @@ class Engine:
             for ms in scored:
                 pos = self.portfolio.get(ms.market.id)
                 if pos and ms.signal == Signal.EXIT:
-                    self.state.alerts.append(
+                    msg = (
                         f"! SELL {pos.side}: {pos.question[:40]} "
                         f"— signal EXIT + P&L {pos.pnl_pct:+.0%}"
                     )
+                    self.state.alerts.append(msg)
+                    slug = ms.market.event_slug or ms.market.slug
+                    url = f"https://polymarket.com/event/{slug}" if slug else None
+                    send_toast(
+                        "EXIT Signal — Consider Selling",
+                        f"{pos.question[:50]}\n{pos.side} | P&L {pos.pnl_pct:+.0%}",
+                        url=url,
+                    )
+
+            # Desktop notifications for profit targets on held positions
+            for alert in pnl_alerts:
+                if alert.startswith("$ PROFIT"):
+                    send_toast("Profit Target Hit", alert)
 
     # ------------------------------------------------------------------
     # Data enrichment
