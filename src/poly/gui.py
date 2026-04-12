@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 REFRESH_SECONDS = 45
+REFRESH_FAST = 15  # used when markets are closing soon
 
 # ── Theme colours ────────────────────────────────────────────────────────
 
@@ -482,15 +483,19 @@ class PolyGUI:
         self._alerts.configure(state="disabled")
         self._alerts.see("end")
 
+        # Adaptive refresh: poll faster when markets are about to close
+        interval = REFRESH_FAST if state.closing_soon else REFRESH_SECONDS
+
         # Status
+        fast_tag = " [FAST]" if state.closing_soon else ""
         self._status_var.set(
             f"{n} markets | cycle {state.cycle} | {t:.1f}s | "
-            f"next in {REFRESH_SECONDS}s"
+            f"next in {interval}s{fast_tag}"
         )
         self._refresh_btn.state(["!disabled"])
 
         # Schedule next refresh
-        self._refresh_job = self.root.after(REFRESH_SECONDS * 1000, self._do_refresh)
+        self._refresh_job = self.root.after(interval * 1000, self._do_refresh)
 
     # ── Detail panel ─────────────────────────────────────────────────
 

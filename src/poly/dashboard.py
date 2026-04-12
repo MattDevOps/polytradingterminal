@@ -16,6 +16,7 @@ from .models import MarketScore, Signal
 from .portfolio import Position
 
 REFRESH_SECONDS = 45
+REFRESH_FAST = 15  # used when markets are closing soon
 
 # ── Styling helpers ───────────────────────────────────────────────────────
 
@@ -252,10 +253,14 @@ class PolyTerminal(App):
     async def on_mount(self) -> None:
         table = self.query_one("#scanner", DataTable)
         table.add_columns("SC", "MARKET", "PICK", "PRICE", "SIGNAL")
+        self._refresh_timer = None
         await self._do_refresh()
-        self.set_interval(REFRESH_SECONDS, self._do_refresh)
 
     async def _do_refresh(self) -> None:
+        # Cancel previous timer if rescheduling
+        if self._refresh_timer is not None:
+            self._refresh_timer.stop()
+
         alerts = self.query_one("#alerts", RichLog)
         alerts.write(Text(" Scanning...", style="dim italic"))
 
@@ -263,6 +268,7 @@ class PolyTerminal(App):
             state = await self.engine.refresh()
         except Exception as exc:
             alerts.write(Text(f" Error: {exc}", style="bold red"))
+            self._refresh_timer = self.set_timer(REFRESH_SECONDS, self._do_refresh)
             return
 
         if state.error:
@@ -272,14 +278,28 @@ class PolyTerminal(App):
         self._rebuild_table()
 
         for a in state.alerts:
-            color = "bold green" if "\u25b2" in a else ("bold red" if "\u25bc" in a else "cyan")
+            if "\u23f0" in a:
+                color = "bold yellow"
+            elif "\u25b2" in a:
+                color = "bold green"
+            elif "\u25bc" in a:
+                color = "bold red"
+            else:
+                color = "cyan"
             alerts.write(Text(a, style=color))
+
+        # Adaptive refresh: poll faster when markets are about to close
+        interval = REFRESH_FAST if state.closing_soon else REFRESH_SECONDS
 
         n = len(state.markets)
         t = state.last_refresh
-        alerts.write(Text(f" Cycle {state.cycle}: {n} markets in {t:.1f}s", style="dim"))
+        fast_tag = " [FAST]" if state.closing_soon else ""
+        alerts.write(Text(f" Cycle {state.cycle}: {n} markets in {t:.1f}s | next {interval}s{fast_tag}", style="dim"))
 
         self._show_detail()
+
+        # Schedule next refresh
+        self._refresh_timer = self.set_timer(interval, self._do_refresh)
 
     def _rebuild_table(self) -> None:
         table = self.query_one("#scanner", DataTable)

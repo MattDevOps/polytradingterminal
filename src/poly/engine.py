@@ -6,6 +6,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from .api import PolymarketAPI
 from .factors.divergence import compute_divergence
@@ -21,6 +22,9 @@ log = logging.getLogger(__name__)
 # How many top markets (by 24h volume) to analyse in depth
 TOP_N = 40
 
+# Markets closing within this many seconds trigger an early warning toast
+CLOSING_SOON_SECS = 600  # 10 minutes
+
 
 @dataclass
 class EngineState:
@@ -32,6 +36,7 @@ class EngineState:
     cycle: int = 0
     last_refresh: float = 0.0
     error: str | None = None
+    closing_soon: bool = False  # True when any actionable market is near close
 
 
 class Engine:
@@ -42,6 +47,7 @@ class Engine:
         self.state = EngineState()
         self._prev_signals: dict[str, Signal] = {}
         self.portfolio = Portfolio()
+        self._notified_closing: set[str] = set()  # market IDs already toasted
 
     async def close(self) -> None:
         await self.api.close()
@@ -119,6 +125,39 @@ class Engine:
                     f"{arrow} {ms.signal.value}: {short_q} (was {prev.value})"
                 )
             self._prev_signals[ms.market.id] = ms.signal
+
+        # 5b. Closing-soon warnings for actionable markets
+        _ACTIONABLE = {Signal.ENTER, Signal.STRONG_ENTER, Signal.HOLD}
+        now = datetime.now(timezone.utc)
+        for ms in scored:
+            end = _parse_end_date(ms.market.end_date)
+            if end is None or ms.signal not in _ACTIONABLE:
+                continue
+            remaining = (end - now).total_seconds()
+            if 0 < remaining <= CLOSING_SOON_SECS:
+                self.state.closing_soon = True
+                if ms.market.id not in self._notified_closing:
+                    self._notified_closing.add(ms.market.id)
+                    mins = max(1, int(remaining // 60))
+                    short_q = ms.market.question[:50]
+                    self.state.alerts.append(
+                        f"⏰ CLOSING in ~{mins}m: {short_q} [{ms.signal.value}]"
+                    )
+                    if ms.signal in {Signal.ENTER, Signal.STRONG_ENTER}:
+                        slug = ms.market.event_slug or ms.market.slug
+                        url = f"https://polymarket.com/event/{slug}" if slug else None
+                        send_toast(
+                            f"Market closing in ~{mins} min!",
+                            f"[{ms.signal.value}] BUY {ms.pick_label} — {short_q}\n"
+                            f"Score {ms.composite:.2f}",
+                            url=url,
+                        )
+
+        # Expire tracking for markets that already closed
+        self._notified_closing = {
+            mid for mid in self._notified_closing
+            if mid in {ms.market.id for ms in scored}
+        }
 
         # Pair divergence alerts
         for ps in pair_signals:
@@ -285,3 +324,16 @@ def _find_name(markets: list[Market], mid: str) -> str:
         if m.id == mid:
             return m.question
     return mid[:12]
+
+
+def _parse_end_date(raw: str | None) -> datetime | None:
+    """Parse ISO-8601 end_date from the Gamma API into a tz-aware datetime."""
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, TypeError):
+        return None

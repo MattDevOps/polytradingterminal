@@ -28,7 +28,12 @@ async def _scan() -> None:
         hits = [ms for ms in state.markets if ms.signal in ALERT_SIGNALS]
 
         if not hits:
-            print(f"Scan complete: {len(state.markets)} markets scanned — no ENTER/STRONG ENTER signals.")
+            # Still report if there are closing-soon alerts in the engine output
+            closing = [a for a in state.alerts if "\u23f0" in a]
+            if closing:
+                print(f"Scan complete: no signals, but {len(closing)} market(s) closing soon.")
+            else:
+                print(f"Scan complete: {len(state.markets)} markets scanned — no ENTER/STRONG ENTER signals.")
             return
 
         # Build notification body
