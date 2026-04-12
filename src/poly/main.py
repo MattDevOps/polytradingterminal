@@ -36,6 +36,10 @@ def run() -> None:
         help="Number of markets to show in headless mode",
     )
     parser.add_argument(
+        "--scan", action="store_true",
+        help="Run one scan cycle and send a toast notification on ENTER/STRONG ENTER signals",
+    )
+    parser.add_argument(
         "--debug", action="store_true",
         help="Enable debug logging",
     )
@@ -46,7 +50,10 @@ def run() -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
-    if args.headless:
+    if args.scan:
+        from .scanner import run_scan
+        run_scan()
+    elif args.headless:
         asyncio.run(_headless(args.top))
     elif args.gui:
         _launch_gui()
