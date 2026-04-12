@@ -64,7 +64,10 @@ class Engine:
     async def _run_cycle(self) -> None:
         # 1. Fetch top markets by 24h volume
         markets = await self.api.get_markets(limit=TOP_N, active=True)
-        markets = [m for m in markets if m.outcome_prices and m.clob_token_ids]
+        markets = [
+            m for m in markets
+            if m.outcome_prices and m.clob_token_ids and not m.closed
+        ]
 
         if not markets:
             self.state.error = "No active markets returned from API"
