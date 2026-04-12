@@ -40,6 +40,10 @@ def run() -> None:
         help="Run one scan cycle and send a toast notification on ENTER/STRONG ENTER signals",
     )
     parser.add_argument(
+        "--monitor", action="store_true",
+        help="Run a background monitor that sends toast notifications for new signals (no window)",
+    )
+    parser.add_argument(
         "--portfolio", action="store_true",
         help="Show current portfolio positions and P&L",
     )
@@ -66,7 +70,10 @@ def run() -> None:
         _portfolio_cli(args)
         return
 
-    if args.scan:
+    if args.monitor:
+        from .monitor import run_monitor
+        run_monitor()
+    elif args.scan:
         from .scanner import run_scan
         run_scan()
     elif args.headless:
