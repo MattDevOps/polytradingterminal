@@ -51,9 +51,9 @@ class DetailPanel(Static):
         t.append(m.question + "\n\n", style="bold")
 
         # Pick recommendation
-        pick_style = "bold white on dark_green" if ms.pick == "YES" else "bold white on red"
+        pick_style = "bold white on dark_green" if ms.pick_is_yes else "bold white on red"
         t.append("  PICK  ", style="bold")
-        t.append(f"  BUY {ms.pick}  ", style=pick_style)
+        t.append(f"  BUY {ms.pick_label}  ", style=pick_style)
         conf_pct = ms.pick_confidence * 100
         t.append(f"  ({conf_pct:.0f}% confidence)\n\n", style="dim")
 
@@ -198,8 +198,11 @@ class PolyTerminal(App):
                 q = q[:34] + ".."
 
             price = ms.market.outcome_prices[0] if ms.market.outcome_prices else 0.0
-            pick_style = "bold white on dark_green" if ms.pick == "YES" else "bold white on red"
-            pick_text = Text(f" {ms.pick} ", style=pick_style)
+            pick_style = "bold white on dark_green" if ms.pick_is_yes else "bold white on red"
+            label = ms.pick_label
+            if len(label) > 14:
+                label = label[:12] + ".."
+            pick_text = Text(f" {label} ", style=pick_style)
 
             table.add_row(
                 _bar(ms.composite, 3),

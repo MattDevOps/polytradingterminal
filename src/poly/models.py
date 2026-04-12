@@ -75,6 +75,23 @@ class MarketScore:
         return "YES" if combined >= 0 else "NO"
 
     @property
+    def pick_is_yes(self) -> bool:
+        return self.pick == "YES"
+
+    @property
+    def pick_label(self) -> str:
+        """Human-readable pick — shows outcome name (e.g. team) instead of YES/NO."""
+        outcomes = self.market.outcomes
+        if self.pick_is_yes:
+            name = outcomes[0] if outcomes else "YES"
+        else:
+            name = outcomes[1] if len(outcomes) > 1 else "NO"
+        # Standard binary markets keep YES/NO
+        if name.lower() in ("yes", "no"):
+            return name.upper()
+        return name
+
+    @property
     def pick_confidence(self) -> float:
         """0.0 – 1.0 confidence in the pick direction."""
         div_bias = self.divergence.bias
