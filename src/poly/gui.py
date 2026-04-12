@@ -11,6 +11,7 @@ import logging
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
@@ -248,6 +249,7 @@ class PolyGUI:
         scroll.pack(side="right", fill="y")
 
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
+        self._tree.bind("<Double-1>", self._on_double_click)
 
         # Tag colors for signal rows
         self._tree.tag_configure("strong_enter", foreground=GREEN)
@@ -287,6 +289,14 @@ class PolyGUI:
                                     foreground=ACCENT)
         self._detail.tag_configure("composite_val", font=("Consolas", 14, "bold"),
                                     foreground=FG)
+        self._detail.tag_configure("link", foreground=ACCENT, underline=True,
+                                    font=("Consolas", 10))
+
+        # "View on Polymarket" button below detail panel
+        self._poly_btn = ttk.Button(parent, text="View on Polymarket",
+                                     style="Action.TButton",
+                                     command=self._open_polymarket)
+        self._poly_btn.pack(fill="x", padx=8, pady=(2, 6))
 
     def _build_alerts(self, parent: tk.Frame) -> None:
         hdr = tk.Label(parent, text="  SIGNALS & ALERTS", anchor="w",
@@ -395,6 +405,22 @@ class PolyGUI:
         idx = self._tree.index(sel[0])
         if 0 <= idx < len(self._scored):
             self._show_detail(self._scored[idx])
+
+    def _on_double_click(self, _event=None) -> None:
+        """Double-click a market row to open it on Polymarket."""
+        self._open_polymarket()
+
+    def _open_polymarket(self) -> None:
+        """Open the selected market on polymarket.com in the default browser."""
+        sel = self._tree.selection()
+        if not sel:
+            return
+        idx = self._tree.index(sel[0])
+        if 0 <= idx < len(self._scored):
+            ms = self._scored[idx]
+            slug = ms.market.event_slug or ms.market.slug
+            if slug:
+                webbrowser.open(f"https://polymarket.com/event/{slug}")
 
     def _show_detail(self, ms: MarketScore) -> None:
         d = self._detail

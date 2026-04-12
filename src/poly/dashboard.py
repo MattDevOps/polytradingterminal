@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import webbrowser
+
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -125,6 +127,7 @@ class PolyTerminal(App):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("r", "force_refresh", "Refresh"),
+        Binding("o", "open_market", "Open in Browser"),
     ]
 
     def __init__(self) -> None:
@@ -207,6 +210,16 @@ class PolyTerminal(App):
             detail.set_market(self._scored[idx])
         else:
             detail.set_market(None)
+
+    def action_open_market(self) -> None:
+        """Open the selected market on polymarket.com."""
+        table = self.query_one("#scanner", DataTable)
+        idx = table.cursor_row
+        if idx is not None and 0 <= idx < len(self._scored):
+            ms = self._scored[idx]
+            slug = ms.market.event_slug or ms.market.slug
+            if slug:
+                webbrowser.open(f"https://polymarket.com/event/{slug}")
 
     async def action_force_refresh(self) -> None:
         await self._do_refresh()
