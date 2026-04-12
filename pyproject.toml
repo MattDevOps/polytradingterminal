@@ -1,0 +1,20 @@
+[project]
+name = "polytradingterminal"
+version = "0.1.0"
+description = "Four-factor scoring terminal for Polymarket prediction markets"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "textual>=0.89",
+    "numpy>=1.26",
+]
+
+[project.scripts]
+poly = "poly.main:run"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

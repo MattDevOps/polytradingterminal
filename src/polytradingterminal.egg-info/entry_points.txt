@@ -1,0 +1,2 @@
+[console_scripts]
+poly = poly.main:run
