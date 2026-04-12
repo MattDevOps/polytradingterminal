@@ -888,25 +888,45 @@ class PolyGUI:
         self.root.mainloop()
 
 
-def _focus_existing_window() -> bool:
-    """If a GUI instance is already running, bring it to the foreground.
+_GUI_MUTEX_NAME = "PolyTradingTerminalGUI_SingleInstance"
 
-    Returns True if an existing window was found (caller should exit).
+
+def _try_acquire_gui_lock() -> bool:
+    """Acquire a system-wide named mutex for the GUI.
+
+    Returns True if the lock was acquired (no other GUI running).
+    Returns False if another GUI instance already holds the lock.
+    The kernel releases the mutex automatically when the process exits.
     """
     if sys.platform != "win32":
-        return False
+        return True
+    try:
+        from ctypes import windll
+        windll.kernel32.CreateMutexW(None, True, _GUI_MUTEX_NAME)
+        ERROR_ALREADY_EXISTS = 183
+        if windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+            return False
+        return True
+    except Exception:
+        return True  # on error, allow the GUI to start
+
+
+def _focus_existing_window() -> None:
+    """Try to find and bring an existing GUI window to the foreground."""
+    if sys.platform != "win32":
+        return
     try:
         from ctypes import windll
         user32 = windll.user32
-        hwnd = user32.FindWindowW(None, "POLY TRADING TERMINAL")
+        # Use the Tk window class name so we only match the real GUI window,
+        # not notification windows or other titled windows.
+        hwnd = user32.FindWindowW("TkTopLevel", "POLY TRADING TERMINAL")
         if hwnd:
             SW_RESTORE = 9
             user32.ShowWindow(hwnd, SW_RESTORE)
             user32.SetForegroundWindow(hwnd)
-            return True
     except Exception:
         pass
-    return False
 
 
 def launch_gui() -> None:
@@ -914,8 +934,10 @@ def launch_gui() -> None:
     import sys
     import warnings
 
-    # Single-instance guard: focus the existing window instead of opening another
-    if _focus_existing_window():
+    # Single-instance guard: use a named mutex so only the GUI process
+    # is checked — the background monitor won't interfere.
+    if not _try_acquire_gui_lock():
+        _focus_existing_window()
         return
 
     warnings.filterwarnings("ignore", category=RuntimeWarning, module="numpy")

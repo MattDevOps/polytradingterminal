@@ -61,7 +61,9 @@ def _gui_is_open() -> bool:
         return False
     try:
         from ctypes import windll
-        hwnd = windll.user32.FindWindowW(None, "POLY TRADING TERMINAL")
+        # Match the Tk window class so we only detect the real GUI,
+        # not notification windows or other titled windows.
+        hwnd = windll.user32.FindWindowW("TkTopLevel", "POLY TRADING TERMINAL")
         return bool(hwnd)
     except Exception:
         return False
