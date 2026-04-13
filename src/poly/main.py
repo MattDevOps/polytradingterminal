@@ -56,6 +56,10 @@ def run() -> None:
         help="Remove a position by market ID",
     )
     parser.add_argument(
+        "--status", action="store_true",
+        help="Check whether the background monitor is currently running",
+    )
+    parser.add_argument(
         "--debug", action="store_true",
         help="Enable debug logging",
     )
@@ -65,6 +69,10 @@ def run() -> None:
         level=logging.DEBUG if args.debug else logging.WARNING,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+
+    if args.status:
+        _check_monitor_status()
+        return
 
     if args.portfolio or args.add_position or args.remove_position:
         _portfolio_cli(args)
@@ -82,6 +90,65 @@ def run() -> None:
         _launch_gui()
     else:
         _launch_tui()
+
+
+def _check_monitor_status() -> None:
+    """Check if the background monitor process is running."""
+    import subprocess
+
+    ps_script = (
+        "Get-CimInstance Win32_Process "
+        "-Filter \"name='pythonw.exe' or name='python.exe'\" "
+        "| Select-Object ProcessId, CommandLine "
+        "| Format-List"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_script],
+            capture_output=True, text=True, timeout=10,
+        )
+        monitor_pids: list[str] = []
+        current_pid = None
+        is_monitor = False
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("ProcessId"):
+                current_pid = line.split(":", 1)[1].strip()
+            elif line.startswith("CommandLine"):
+                cmdline = line.split(":", 1)[1].strip().lower()
+                is_monitor = "poly_monitor" in cmdline or "--monitor" in cmdline
+            elif not line and current_pid:
+                if is_monitor:
+                    monitor_pids.append(current_pid)
+                current_pid = None
+                is_monitor = False
+        # Flush last entry
+        if current_pid and is_monitor:
+            monitor_pids.append(current_pid)
+
+        if monitor_pids:
+            print(f"Poly Monitor is RUNNING  ({len(monitor_pids)} process{'es' if len(monitor_pids) > 1 else ''})")
+            for pid in monitor_pids:
+                print(f"  PID {pid}")
+            print("\nTo stop:  taskkill /PID <pid>")
+        else:
+            print("Poly Monitor is NOT running.")
+            print("\nTo start:")
+            print("  pythonw poly_monitor.pyw        (background, no window)")
+            print("  python -m poly --monitor        (foreground, with console)")
+    except Exception as exc:
+        print(f"Could not check process status: {exc}")
+
+    # Show recent log tail
+    from .monitor import LOG_FILE
+    if LOG_FILE.exists():
+        print(f"\nLog: {LOG_FILE}")
+        lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+        tail = lines[-8:]
+        if tail:
+            print("Last log entries:")
+            for ln in tail:
+                print(f"  {ln}")
 
 
 def _portfolio_cli(args) -> None:

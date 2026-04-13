@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+import time
+from pathlib import Path
 
 from .engine import Engine
 from .models import Signal
@@ -20,6 +22,30 @@ ALERT_SIGNALS = {Signal.ENTER, Signal.STRONG_ENTER}
 # Refresh intervals (seconds) – mirrors the GUI
 REFRESH_NORMAL = 15
 REFRESH_FAST = 5
+
+# Restart policy
+MAX_RETRIES = 5
+RETRY_BACKOFF_BASE = 30  # seconds, doubles each attempt
+
+# Log file lives next to poly_monitor.pyw in the project root
+_LOG_DIR = Path(__file__).resolve().parents[2]
+LOG_FILE = _LOG_DIR / "poly_monitor.log"
+
+
+def _setup_file_logging() -> None:
+    """Configure logging to write to a rotating log file."""
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+
+    from logging.handlers import RotatingFileHandler
+
+    handler = RotatingFileHandler(
+        LOG_FILE, maxBytes=512_000, backupCount=2, encoding="utf-8",
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s  %(message)s")
+    )
+    root.addHandler(handler)
 
 
 async def _loop() -> None:
@@ -106,4 +132,32 @@ def run_monitor() -> None:
         if sys.stderr is None or getattr(sys.stderr, "closed", True):
             sys.stderr = devnull
 
-    asyncio.run(_loop())
+    _setup_file_logging()
+    log.info("Poly Monitor starting (PID %d)", __import__("os").getpid())
+
+    retries = 0
+    while retries < MAX_RETRIES:
+        try:
+            asyncio.run(_loop())
+            break  # clean exit
+        except KeyboardInterrupt:
+            log.info("Monitor stopped by user")
+            break
+        except Exception:
+            retries += 1
+            wait = RETRY_BACKOFF_BASE * (2 ** (retries - 1))
+            log.exception(
+                "Monitor crashed (attempt %d/%d) – restarting in %ds",
+                retries, MAX_RETRIES, wait,
+            )
+            time.sleep(wait)
+
+    if retries >= MAX_RETRIES:
+        log.critical(
+            "Monitor exceeded %d retries – giving up. "
+            "Check %s for details.", MAX_RETRIES, LOG_FILE,
+        )
+        send_toast(
+            "Poly Monitor stopped",
+            f"Crashed {MAX_RETRIES} times. Check poly_monitor.log for details.",
+        )
