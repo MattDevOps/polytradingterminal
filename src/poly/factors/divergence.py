@@ -82,6 +82,17 @@ def _score_multi_outcome(group: list[Market], out: dict[str, FactorScore]) -> No
     total = sum(p for _, p in prices)
     overround = total - 1.0
 
+    # If prices sum to something far below 1.0 the data is incomplete
+    # (e.g. live esports mid-match). Fall back to binary scoring instead
+    # of computing bogus fair values.
+    if total < 0.50:
+        for m, _ in prices:
+            _score_binary(m, {}, out)
+        for m in group:
+            if m.id not in out:
+                out[m.id] = FactorScore("divergence", 0.0, details="incomplete group prices")
+        return
+
     # Compute raw biases first, then centre within the group.
     # Without centring, overround pushes *every* outcome's bias negative,
     # so the model says NO on everything — useless for multi-outcome events.
@@ -152,9 +163,9 @@ def _score_binary(
         momentum_div = abs(last_price - mean_price)
         components.append(min(1.0, momentum_div / 0.08))
         details_parts.append(f"mom Δ{momentum_div:.3f}")
-        # Mean reversion: if price dropped below mean → YES underpriced (+)
-        #                  if price rose above mean → YES overpriced (-)
-        raw_bias = mean_price - last_price
+        # Momentum: if price is above recent mean → YES trending up (+)
+        #           if price is below recent mean → NO trending up (-)
+        raw_bias = last_price - mean_price
         bias = max(-1.0, min(1.0, raw_bias / 0.08))
 
     if not components:

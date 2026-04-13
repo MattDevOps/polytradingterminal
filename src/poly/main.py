@@ -56,6 +56,10 @@ def run() -> None:
         help="Remove a position by market ID",
     )
     parser.add_argument(
+        "--backtest", action="store_true",
+        help="Backtest scoring thresholds against resolved markets",
+    )
+    parser.add_argument(
         "--status", action="store_true",
         help="Check whether the background monitor is currently running",
     )
@@ -76,6 +80,11 @@ def run() -> None:
 
     if args.portfolio or args.add_position or args.remove_position:
         _portfolio_cli(args)
+        return
+
+    if args.backtest:
+        from .backtest import run_backtest
+        asyncio.run(run_backtest())
         return
 
     if args.monitor:

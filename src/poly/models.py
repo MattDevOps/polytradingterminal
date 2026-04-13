@@ -100,10 +100,11 @@ class MarketScore:
         return min(1.0, abs(combined))
 
     def score(self) -> None:
-        """Compute composite score and signal from four factors.
+        """Compute composite score and signal from four factors + direction confidence.
 
-        The rule: when all four factors align → ENTER.
-        When any factor *actively breaks* (drops well below threshold) → EXIT.
+        The factors measure *opportunity* (is something happening?).
+        Direction confidence measures *predictability* (do we know which way?).
+        Both must be present to trigger an entry signal.
         """
         vals = [f.value for f in self.factors]
 
@@ -111,15 +112,15 @@ class MarketScore:
         avg = sum(vals) / 4
         self.composite = min(vals) * 0.3 + avg * 0.7
 
+        conf = self.pick_confidence
         aligned = sum(1 for v in vals if v >= 0.50)
-        strong  = sum(1 for v in vals if v >= 0.65)
-        weak    = sum(1 for v in vals if v < 0.20)
+        weak = sum(1 for v in vals if v < 0.20)
 
-        if strong >= 4 and self.composite >= 0.65:
+        if self.composite >= 0.40 and conf >= 0.5 and aligned >= 3:
             self.signal = Signal.STRONG_ENTER
-        elif aligned >= 3 and strong >= 2 and self.composite >= 0.50:
+        elif self.composite >= 0.35 and conf >= 0.4:
             self.signal = Signal.ENTER
-        elif aligned >= 2 and self.composite >= 0.40:
+        elif self.composite >= 0.30 and aligned >= 2:
             self.signal = Signal.HOLD
         elif weak >= 2:
             self.signal = Signal.EXIT

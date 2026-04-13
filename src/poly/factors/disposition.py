@@ -38,22 +38,46 @@ async def compute_disposition(
     for m in markets:
         trades = trades_by_market.get(m.id, [])
         prices = price_series.get(m.id, [])
-        scores[m.id] = _score_market(m, trades, prices)
+        yes_token = m.clob_token_ids[0] if m.clob_token_ids else None
+        scores[m.id] = _score_market(m, trades, prices, yes_token)
     return scores
+
+
+def _normalise_side(trade: dict, yes_token: str | None) -> str:
+    """Return 'BUY' or 'SELL' normalised to the YES direction.
+
+    On Polymarket, the ``asset`` field tells us which token was traded.
+    BUY-YES and SELL-NO are bullish (normalised to BUY).
+    SELL-YES and BUY-NO are bearish (normalised to SELL).
+    When the asset field is missing we fall back to the raw side.
+    """
+    raw_side = str(trade.get("side", "")).upper()
+    if not yes_token:
+        return raw_side
+
+    asset = str(trade.get("asset", ""))
+    if asset == yes_token:
+        return raw_side              # already in YES terms
+    elif asset:
+        # Trade is on the NO token — flip the direction
+        return "SELL" if raw_side == "BUY" else "BUY"
+    return raw_side                  # no asset info, keep raw
 
 
 def _score_market(
     market: Market, trades: list[dict], prices: list[float],
+    yes_token: str | None = None,
 ) -> FactorScore:
     if len(trades) < 5:
         return _fallback(market)
 
-    # Group by wallet
+    # Group by wallet, normalising BUY/SELL to the YES direction
     wallets: dict[str, list[dict]] = defaultdict(list)
     for t in trades:
         addr = t.get("proxyWallet", "")
         if addr:
-            wallets[addr].append(t)
+            normalised = dict(t, side=_normalise_side(t, yes_token))
+            wallets[addr].append(normalised)
 
     if not wallets:
         return _fallback(market)
@@ -100,10 +124,10 @@ def _score_market(
     # Normalize: DC 5+ is elite, 1 is average, 0 is worst
     dc_score = min(1.0, weighted_dc / 5.0)
 
-    # Recent flow bias: net buying or selling?
+    # Recent flow bias: net buying or selling? (normalised to YES direction)
     recent = trades[-min(50, len(trades)):]
-    buy_vol  = sum(_f(t.get("size", 0)) for t in recent if str(t.get("side", "")).upper() == "BUY")
-    sell_vol = sum(_f(t.get("size", 0)) for t in recent if str(t.get("side", "")).upper() == "SELL")
+    buy_vol  = sum(_f(t.get("size", 0)) for t in recent if _normalise_side(t, yes_token) == "BUY")
+    sell_vol = sum(_f(t.get("size", 0)) for t in recent if _normalise_side(t, yes_token) == "SELL")
     total_r = buy_vol + sell_vol or 1.0
     flow = buy_vol / total_r  # >0.5 = net buying
 
